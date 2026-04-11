@@ -1,3 +1,5 @@
+![Bridle](./docs/cleanslice-bridle-background.png)
+
 # Bridle
 
 Webchat relay for AI agents. Bridle connects browser users to an agent runtime through a stateless NestJS hub, with a ready-made Nuxt chat UI and an agent-side Socket.IO client.
@@ -168,7 +170,7 @@ await bridle.streamSend(clientId, async (onChunk) => {
 
 ## Protocol
 
-See [PROTOCOL.md](./PROTOCOL.md) for the full specification including:
+See [PROTOCOL.md](./docs/PROTOCOL.md) for the full specification including:
 
 - WebSocket event schemas for both connections
 - HTTP API request/response formats
