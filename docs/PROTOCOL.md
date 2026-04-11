@@ -455,7 +455,8 @@ Check per-bot status.
 {
   "ok": true,
   "agentConnected": true,
-  "browserClients": 1
+  "browserClients": 1,
+  "botId": "bot-abc-123"
 }
 ```
 
@@ -569,8 +570,19 @@ interface IBridleOutgoingEvent {
 ```typescript
 interface IBridleHealthData {
   ok: boolean
-  agentConnected: boolean
-  browserClients: number
+  agentConnected: boolean  // Whether any agent is connected
+  browserClients: number   // Total connected browsers
+}
+```
+
+### IBridleBotHealthData
+
+```typescript
+interface IBridleBotHealthData {
+  ok: boolean
+  agentConnected: boolean  // Whether this bot's agent is connected
+  browserClients: number   // Browsers connected to this bot
+  botId: string            // Bot identifier
 }
 ```
 

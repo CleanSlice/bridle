@@ -105,11 +105,14 @@ NestJS WebSocket guards (`@UseGuards`) only run on `@SubscribeMessage` handlers,
 ```json
 {
   "text": "Hello, agent",
-  "images": [
-    { "base64": "<base64>", "mediaType": "image/jpeg" }
+  "parts": [
+    { "type": "text", "text": "Hello, agent" },
+    { "type": "image", "base64": "<base64>", "mediaType": "image/jpeg" }
   ]
 }
 ```
+
+`parts` is optional. If omitted, built from `text` + `images` (legacy).
 
 ### Health response (`/api/agent/health`)
 
@@ -140,7 +143,7 @@ NestJS WebSocket guards (`@UseGuards`) only run on `@SubscribeMessage` handlers,
 
 | Event | Payload | Description |
 |-------|---------|-------------|
-| `message` | `{ type, clientId, text, messageId, images? }` | Browser user sent a message |
+| `message` | `{ type, clientId, text, parts, messageId }` | Browser user sent a message |
 | `pong` | `{}` | Response to agent's `ping` |
 
 **Agent -> Hub:**
@@ -148,9 +151,9 @@ NestJS WebSocket guards (`@UseGuards`) only run on `@SubscribeMessage` handlers,
 | Event | Payload | Description |
 |-------|---------|-------------|
 | `register` | `{}` | Agent announces readiness |
-| `message` | `{ clientId, text, messageId, ts }` | Complete response |
-| `stream` | `{ clientId, text, messageId, ts }` | Partial response (accumulated text) |
-| `stream_end` | `{ clientId, text, messageId, ts }` | Final streaming chunk |
+| `message` | `{ clientId, text, parts, messageId, ts }` | Complete response |
+| `stream` | `{ clientId, text, parts, messageId, ts }` | Partial response (accumulated) |
+| `stream_end` | `{ clientId, text, parts, messageId, ts }` | Final streaming chunk |
 | `typing` | `{ clientId, ts }` | Typing indicator |
 | `ping` | `{}` | Keepalive |
 
@@ -160,7 +163,7 @@ NestJS WebSocket guards (`@UseGuards`) only run on `@SubscribeMessage` handlers,
 
 | Event | Payload | Description |
 |-------|---------|-------------|
-| `message` | `{ text, images? }` | Send message to bot |
+| `message` | `{ text, parts?, images? }` | Send message to bot |
 | `ping` | `{}` | Keepalive |
 
 **Hub -> Browser:**
@@ -168,9 +171,9 @@ NestJS WebSocket guards (`@UseGuards`) only run on `@SubscribeMessage` handlers,
 | Event | Payload | Description |
 |-------|---------|-------------|
 | `welcome` | `{ clientId }` | Sent on connection |
-| `message` | `{ type, text, messageId, ts }` | Complete response |
-| `stream` | `{ type, text, messageId, ts }` | Partial response (accumulated, not delta) |
-| `stream_end` | `{ type, text, messageId, ts }` | Final streaming chunk |
+| `message` | `{ type, text, parts, messageId, ts }` | Complete response |
+| `stream` | `{ type, text, parts, messageId, ts }` | Partial response (accumulated, not delta) |
+| `stream_end` | `{ type, text, parts, messageId, ts }` | Final streaming chunk |
 | `typing` | `{ type, ts }` | Typing indicator |
 | `pong` | `{ ts }` | Response to `ping` |
 
@@ -207,10 +210,12 @@ BridleModule
 // Domain (abstract gateway + types)
 IBridleGateway          // Abstract class -- DI token
 IBridleHealthData       // { ok, agentConnected, browserClients }
-IBridleImageData        // { base64, mediaType }
-IBridleIncomingMessage  // Hub -> Agent message (includes botId)
-IBridleOutgoingEvent    // Agent -> Hub event
+IBridleBotHealthData    // { ok, agentConnected, browserClients, botId }
+IBridleIncomingMessage  // Hub -> Agent message (includes botId + parts)
+IBridleOutgoingEvent    // Agent -> Hub event (includes parts)
 IBridleClientData       // { botId, send } -- registered client metadata
+BridlePartTypes         // Enum: Text, Image, File
+BridlePart              // Union type for wire parts
 
 // Data (concrete implementation)
 BridleGateway           // Hub implementation with per-bot maps
@@ -221,9 +226,9 @@ BridleAgentWsHandler    // Agent WebSocket handler (apiKey auth)
 BridleChatWsHandler     // Browser WebSocket handler (JWT auth)
 
 // DTOs
-SendMessageDto          // Request body for message endpoints
-BridleImageDto          // Image attachment
-BridleHealthDto         // Health response
+SendMessageDto          // Request body (text + parts + legacy images)
+BridleHealthDto         // Response for /api/agent/health
+BridleBotHealthDto      // Response for /api/agent/:botId/health (includes botId)
 ```
 
 ## Protocol
