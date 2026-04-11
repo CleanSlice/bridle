@@ -1,0 +1,61 @@
+import { Controller, Post, Get, Body, HttpCode, Req } from '@nestjs/common'
+import { ApiTags, ApiOperation, ApiBody, ApiOkResponse } from '@nestjs/swagger'
+import { IBridleGateway } from './domain'
+import { SendMessageDto, BridleHealthDto } from './dtos'
+import { FlatResponse } from '#core'
+
+@ApiTags('bridle')
+@Controller('api/agent')
+export class BridleController {
+  constructor(private readonly hub: IBridleGateway) {}
+
+  @ApiOperation({ description: 'Send a message to the agent (HTTP fallback — fire & forget)', operationId: 'sendBridleMessage' })
+  @ApiBody({ type: SendMessageDto })
+  @FlatResponse()
+  @Post('message')
+  @HttpCode(200)
+  async sendMessage(@Req() req: Record<string, unknown>, @Body() body: SendMessageDto) {
+    const user = req.user as Record<string, unknown> | undefined
+    const clientId = (user?.id as string) ?? 'http-' + crypto.randomUUID()
+    this.hub.sendToAgent(clientId, body.text, body.images)
+    return { ok: true }
+  }
+
+  @ApiOperation({ description: 'Send a message and wait for the agent response (synchronous)', operationId: 'sendBridleMessageSync' })
+  @ApiBody({ type: SendMessageDto })
+  @FlatResponse()
+  @Post('message/sync')
+  @HttpCode(200)
+  async sendMessageSync(@Req() req: Record<string, unknown>, @Body() body: SendMessageDto) {
+    const clientId = 'sync-' + crypto.randomUUID()
+    const chunks: string[] = []
+
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        this.hub.unregisterClient(clientId)
+        resolve({ text: chunks.join('') || 'Timeout: no response from agent', messageId: '', ts: Date.now() })
+      }, 120_000)
+
+      this.hub.registerClient(clientId, (data: unknown) => {
+        const event = data as Record<string, unknown>
+        if (event.type === 'message' || event.type === 'stream_end') {
+          clearTimeout(timeout)
+          this.hub.unregisterClient(clientId)
+          resolve({ text: event.text ?? chunks.join(''), messageId: event.messageId, ts: event.ts })
+        } else if (event.type === 'stream') {
+          chunks.push((event.text as string) ?? '')
+        }
+      })
+
+      this.hub.sendToAgent(clientId, body.text, body.images)
+    })
+  }
+
+  @ApiOperation({ description: 'Check agent connection status', operationId: 'bridleHealth' })
+  @FlatResponse()
+  @ApiOkResponse({ type: BridleHealthDto })
+  @Get('health')
+  async health() {
+    return this.hub.health()
+  }
+}
