@@ -4,6 +4,8 @@
 
 Webchat relay for AI agents. Bridle connects browser users to an agent runtime through a stateless NestJS hub, with a ready-made Nuxt chat UI and an agent-side Socket.IO client.
 
+[Protocol Specification](./docs/PROTOCOL.md) | [Hub Server (NestJS)](./nestjs/README.md) | [Chat UI (Nuxt)](./nuxt/README.md) | [Agent Client (Runtime)](./runtime/README.md)
+
 ```
 Browser (Nuxt)               Bridle Hub (NestJS)           Agent Runtime
      |                             |                             |
@@ -11,9 +13,10 @@ Browser (Nuxt)               Bridle Hub (NestJS)           Agent Runtime
      |   auth: { token, botId }    |--- /ws/agent -------------->|
      |                             |   auth: { apiKey, botId }   |
      |<--- stream/message ---------|<--- stream/message ---------|
+     |   { text, parts[] }         |   { text, parts[] }         |
 ```
 
-The hub is **stateless** -- it holds no message history. It routes messages between browsers and agents in real time using Socket.IO. Multiple bots can connect simultaneously, each scoped by `botId`.
+The hub is **stateless** -- it holds no message history. It routes messages between browsers and agents in real time using Socket.IO. Multiple bots can connect simultaneously, each scoped by `botId`. All messages carry rich `parts[]` (text, images, files) alongside a plain `text` shorthand.
 
 ## Quick Install
 
@@ -50,7 +53,7 @@ Steps:
    - Start the agent runtime, confirm it connects and `/api/agent/<botId>/health` shows `agentConnected: true`
    - Open the Nuxt app with the BridleProvider component, confirm the chat connects and messages flow
 
-Read the bridle README.md and PROTOCOL.md for full auth details and type definitions.
+Read the bridle README.md and docs/PROTOCOL.md for full auth details, parts format, and type definitions.
 ~~~
 
 ## Packages
@@ -60,6 +63,26 @@ Read the bridle README.md and PROTOCOL.md for full auth details and type definit
 | `nestjs/` | Hub server -- WebSocket relay + HTTP fallback | NestJS, Socket.IO, JWT |
 | `nuxt/` | Chat UI -- drop-in component + Pinia store | Nuxt 3, Vue 3, shadcn-vue |
 | `runtime/` | Agent client -- connects to the hub as a channel | Socket.IO client |
+
+## Message Parts
+
+All messages carry a `parts: BridlePart[]` array for rich content. The `text` field is always present as a plain-text shorthand.
+
+```typescript
+// Part types on the wire
+{ type: "text",  text: "Hello" }
+{ type: "image", base64: "...", mediaType: "image/jpeg" }
+{ type: "file",  url: "https://...", name: "doc.pdf", mimeType: "application/pdf" }
+```
+
+Parts flow end-to-end:
+
+- **Browser → Hub**: sends `{ text, parts }` (or legacy `{ text, images }` which the hub converts)
+- **Hub → Agent**: forwards `{ text, parts, clientId, messageId }`
+- **Agent → Hub → Browser**: responds with `{ text, parts, messageId, ts }`
+- **Streaming**: `stream` and `stream_end` events also carry `parts`
+
+The Nuxt chat UI renders each part type: text as paragraphs, images inline, files as download links.
 
 ## Authentication
 
@@ -73,7 +96,7 @@ Agent runtimes prove identity with a shared API key and declare which bot they s
 io('http://hub-host/ws/agent', {
   auth: {
     apiKey: process.env.BRIDLE_API_KEY,  // Shared secret
-    botId: process.env.BRIDLE_BOT_ID,         // Which bot this agent serves
+    botId: process.env.BRIDLE_BOT_ID,    // Which bot this agent serves
   },
 })
 ```
@@ -165,27 +188,32 @@ BridleModule
 // Domain (abstract gateway + types)
 IBridleGateway          // Abstract class -- DI token
 IBridleHealthData       // { ok, agentConnected, browserClients }
-IBridleImageData        // { base64, mediaType }
-IBridleIncomingMessage  // Hub -> Agent message (includes botId)
-IBridleOutgoingEvent    // Agent -> Hub event
+IBridleBotHealthData    // { ok, agentConnected, browserClients, botId }
+IBridleIncomingMessage  // Hub -> Agent message (includes botId + parts)
+IBridleOutgoingEvent    // Agent -> Hub event (includes parts)
 IBridleClientData       // { botId, send } -- registered client metadata
+BridlePartTypes         // Enum: Text, Image, File
+BridlePart              // Union type for wire parts
+buildParts              // Helper: text + images -> BridlePart[]
+getTextFromParts        // Helper: BridlePart[] -> string
 
 // Data (concrete implementation)
 BridleGateway           // Hub implementation with per-bot maps
 
 // Presentation
 BridleController        // HTTP endpoints (/:botId scoped)
-ChatWsGateway           // Browser WebSocket handler (JWT auth)
-AgentWsGateway          // Agent WebSocket handler (apiKey auth)
+BridleAgentWsHandler    // Agent WebSocket handler (apiKey auth)
+BridleChatWsHandler     // Browser WebSocket handler (JWT auth)
 
 // DTOs
-SendMessageDto          // Request body for message endpoints
-BridleHealthDto         // Response for health endpoints
+SendMessageDto          // Request body (text + parts + legacy images)
+BridleHealthDto         // Response for /api/agent/health
+BridleBotHealthDto      // Response for /api/agent/:botId/health (includes botId)
 ```
 
 ## Chat UI (Nuxt)
 
-A drop-in chat widget built with shadcn-vue. Connects to the hub via Socket.IO with JWT authentication and manages all state through a Pinia store.
+A drop-in chat widget built with shadcn-vue. Connects to the hub via Socket.IO with JWT authentication and manages all state through a Pinia store. Renders rich message parts (text, images, files).
 
 ### Usage
 
@@ -206,7 +234,7 @@ Add the slice as a Nuxt layer, then use the component:
 | Component | File | Description |
 |-----------|------|-------------|
 | `BridleProvider` | `components/bridle/Provider.vue` | Full chat widget -- connection, messages, input |
-| `BridleMessage` | `components/bridle/Message.vue` | Single message bubble (user or assistant) |
+| `BridleMessage` | `components/bridle/Message.vue` | Message bubble with parts rendering (text, images, files) |
 | `BridleInput` | `components/bridle/Input.vue` | Text input with send button |
 
 ### Props
@@ -230,7 +258,7 @@ store.sendMessage('Hello')
 store.disconnect()
 
 // Reactive state
-store.messages     // IBridleMessageData[]
+store.messages     // IBridleMessageData[] (each has .text + .parts[])
 store.isConnected  // boolean
 store.isTyping     // boolean
 store.isOpen       // boolean (for toggle UI)
@@ -252,7 +280,7 @@ export default defineNuxtConfig({
 
 ## Agent Client (Runtime)
 
-`BridleRepository` connects to the hub as a Socket.IO client and implements the `IChannelGateway` interface. It authenticates using `BRIDLE_API_KEY` and `BRIDLE_BOT_ID` environment variables.
+`BridleRepository` connects to the hub as a Socket.IO client and implements the `IChannelGateway` interface. It authenticates using `BRIDLE_API_KEY` and `BRIDLE_BOT_ID` environment variables. Sends and receives `parts[]` on the wire.
 
 ### Usage
 
@@ -263,11 +291,18 @@ const bridle = new BridleRepository('http://localhost:3333')
 
 bridle.onMessage(async (msg) => {
   console.log(`[${msg.from}]: ${msg.text}`)
+  console.log(`parts:`, msg.parts)  // BridlePart[]
 
-  // Simple response
+  // Simple text response
   await bridle.send(msg.from, 'Hello from the agent!')
 
-  // Or stream a response
+  // Response with parts (text + image)
+  await bridle.send(msg.from, 'Here is the result:', [
+    { type: 'text', text: 'Here is the result:' },
+    { type: 'image', base64: '...', mediaType: 'image/png' },
+  ])
+
+  // Stream a text response
   await bridle.streamSend(msg.from, async (onChunk) => {
     const text = await generateResponse(msg.text, onChunk)
     return text
@@ -280,7 +315,6 @@ await bridle.start()
 The repository reads auth credentials from environment variables on connect:
 
 ```typescript
-// These are passed automatically in the Socket.IO handshake
 auth: {
   apiKey: process.env.BRIDLE_API_KEY,
   botId: process.env.BRIDLE_BOT_ID,
@@ -289,7 +323,7 @@ auth: {
 
 ### Streaming
 
-`streamSend` accepts a streamer function. The agent calls `onChunk` with **accumulated text** as it generates. Bridle batches these into `stream` events every 100ms and sends a final `stream_end` when the streamer resolves.
+`streamSend` accepts a streamer function. The agent calls `onChunk` with **accumulated text** as it generates. Bridle batches these into `stream` events every 100ms and sends a final `stream_end` when the streamer resolves. Stream events carry `parts: [{ type: "text", text }]` alongside the `text` field.
 
 ```typescript
 await bridle.streamSend(clientId, async (onChunk) => {
@@ -306,11 +340,13 @@ await bridle.streamSend(clientId, async (onChunk) => {
 
 See [PROTOCOL.md](./docs/PROTOCOL.md) for the full specification including:
 
+- Wire format for `parts[]` (text, image, file)
 - WebSocket event schemas for both connections
 - HTTP API request/response formats
 - Streaming model (accumulated text, not deltas)
 - Sequence diagrams for all message flows
 - TypeScript type definitions
+- Backward compatibility with legacy `images` field
 
 ## Environment Variables
 
@@ -330,30 +366,33 @@ bridle/
 ├── nestjs/                          # Hub server
 │   ├── bridle.module.ts             # NestJS module (ConfigModule + JwtModule)
 │   ├── bridle.controller.ts         # HTTP endpoints (/:botId scoped)
-│   ├── bridle.chat-ws.ts            # Browser WebSocket (JWT auth)
-│   ├── bridle.agent-ws.ts           # Agent WebSocket (apiKey auth)
+│   ├── handlers/
+│   │   ├── bridleChatWs.handler.ts  # Browser WebSocket (JWT auth)
+│   │   └── bridleAgentWs.handler.ts # Agent WebSocket (apiKey auth)
 │   ├── domain/
-│   │   ├── bridle.types.ts          # Interfaces (IBridleClientData, etc.)
-│   │   └── bridle.gateway.ts        # Abstract gateway (botId-aware)
+│   │   ├── bridle.types.ts          # Part types, wire protocol interfaces
+│   │   └── bridle.gateway.ts        # Abstract gateway (botId + parts aware)
 │   ├── data/
 │   │   └── bridle.gateway.ts        # Concrete implementation (per-bot maps)
 │   └── dtos/
-│       ├── sendMessage.dto.ts       # Request DTO
+│       ├── sendMessage.dto.ts       # Request DTO (text + parts + legacy images)
 │       └── bridleHealth.dto.ts      # Response DTO
 ├── nuxt/                            # Chat UI
-│   ├── stores/bridle.ts             # Pinia store (auth-aware connect)
+│   ├── stores/bridle.ts             # Pinia store (parts-aware)
 │   ├── components/bridle/
 │   │   ├── Provider.vue             # Chat widget (apiUrl + botId + token)
-│   │   ├── Message.vue              # Message bubble
+│   │   ├── Message.vue              # Renders text, images, files from parts
 │   │   └── Input.vue                # Text input
 │   └── nuxt.config.ts
 ├── runtime/                         # Agent client
-│   └── bridle.repository.ts         # Socket.IO client (env-based auth)
+│   └── bridle.repository.ts         # Socket.IO client (sends/receives parts)
 └── docs/
     └── PROTOCOL.md                  # Protocol specification
 ```
 
 ## Design Decisions
+
+**Rich parts on the wire.** Every message carries `parts: BridlePart[]` — an array of typed content blocks (text, image, file). The `text` field is always present as a shorthand. Legacy clients sending `{ text, images }` are auto-converted via `buildParts()`. This allows agents to respond with mixed content (text + images + file links) in a single message.
 
 **Stateless hub.** The hub holds no message history. Browser clients maintain their own message list. This keeps the hub simple and horizontally scalable.
 

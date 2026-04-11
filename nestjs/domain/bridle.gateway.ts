@@ -1,4 +1,4 @@
-import type { IBridleHealthData, IBridleImageData, IBridleOutgoingEvent } from './bridle.types'
+import type { IBridleHealthData, IBridleBotHealthData, IBridleOutgoingEvent, BridlePart } from './bridle.types'
 
 /**
  * Hub gateway — manages per-bot connections from agents and browser clients.
@@ -6,7 +6,7 @@ import type { IBridleHealthData, IBridleImageData, IBridleOutgoingEvent } from '
  */
 export abstract class IBridleGateway {
   /** Send a message from a browser client to the agent for a specific bot */
-  abstract sendToAgent(clientId: string, botId: string, text: string, images?: IBridleImageData[]): void
+  abstract sendToAgent(clientId: string, botId: string, text: string, parts: BridlePart[]): void
   /** Send an event to a specific browser client */
   abstract sendToClient(clientId: string, data: unknown): void
   /** Register a browser client for a specific bot */
@@ -22,5 +22,5 @@ export abstract class IBridleGateway {
   /** Health status (all bots) */
   abstract health(): IBridleHealthData
   /** Health status for a specific bot */
-  abstract botHealth(botId: string): IBridleHealthData
+  abstract botHealth(botId: string): IBridleBotHealthData
 }

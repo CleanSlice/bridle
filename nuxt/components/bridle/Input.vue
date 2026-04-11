@@ -14,13 +14,13 @@ const emit = defineEmits<{
 }>()
 
 const input = ref('')
-const textareaRef = ref<HTMLTextAreaElement | null>(null)
+const textareaRef = ref<InstanceType<typeof Textarea> | null>(null)
 
 const handleSend = () => {
   if (!input.value.trim()) return
   emit('send', input.value)
   input.value = ''
-  textareaRef.value?.focus()
+  textareaRef.value?.$el?.focus()
 }
 
 const handleKeydown = (e: KeyboardEvent) => {

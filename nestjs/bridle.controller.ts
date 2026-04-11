@@ -1,7 +1,7 @@
 import { Controller, Post, Get, Body, HttpCode, Param, Req } from '@nestjs/common'
 import { ApiTags, ApiOperation, ApiBody, ApiOkResponse } from '@nestjs/swagger'
-import { IBridleGateway } from './domain'
-import { SendMessageDto, BridleHealthDto } from './dtos'
+import { IBridleGateway, buildParts } from './domain'
+import { SendMessageDto, BridleHealthDto, BridleBotHealthDto } from './dtos'
 import { FlatResponse } from '#core'
 
 @ApiTags('bridle')
@@ -21,7 +21,8 @@ export class BridleController {
   ) {
     const user = req.user as Record<string, unknown> | undefined
     const clientId = (user?.id as string) ?? 'http-' + crypto.randomUUID()
-    this.hub.sendToAgent(clientId, botId, body.text, body.images)
+    const parts = body.parts ?? buildParts(body.text, body.images)
+    this.hub.sendToAgent(clientId, botId, body.text, parts)
     return { ok: true }
   }
 
@@ -55,7 +56,8 @@ export class BridleController {
         }
       })
 
-      this.hub.sendToAgent(clientId, botId, body.text, body.images)
+      const parts = body.parts ?? buildParts(body.text, body.images)
+      this.hub.sendToAgent(clientId, botId, body.text, parts)
     })
   }
 
@@ -69,7 +71,7 @@ export class BridleController {
 
   @ApiOperation({ description: 'Check bot agent connection status', operationId: 'bridleBotHealth' })
   @FlatResponse()
-  @ApiOkResponse({ type: BridleHealthDto })
+  @ApiOkResponse({ type: BridleBotHealthDto })
   @Get(':botId/health')
   async botHealth(@Param('botId') botId: string) {
     return this.hub.botHealth(botId)

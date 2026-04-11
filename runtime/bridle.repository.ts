@@ -1,49 +1,72 @@
 import { randomUUID } from 'crypto'
 import { io, type Socket } from 'socket.io-client'
 
-/**
- * Channel gateway interface — the agent runtime's contract for a messaging channel.
- * Copied from runtime channel domain to keep bridle self-contained.
- */
+// ── Part types (matches wire protocol) ───────────────────────
+
+export enum BridlePartTypes {
+  Text = 'text',
+  Image = 'image',
+  File = 'file',
+}
+
+export interface IBridleTextPart {
+  type: BridlePartTypes.Text
+  text: string
+}
+
+export interface IBridleImagePart {
+  type: BridlePartTypes.Image
+  base64: string
+  mediaType: string
+}
+
+export interface IBridleFilePart {
+  type: BridlePartTypes.File
+  url: string
+  name: string
+  mimeType?: string
+}
+
+export type BridlePart = IBridleTextPart | IBridleImagePart | IBridleFilePart
+
+// ── Channel gateway interface ────────────────────────────────
+
 export interface IChannelGateway {
   readonly name: string
   start(): Promise<void>
   stop(): Promise<void>
-  send(to: string, text: string): Promise<void>
+  send(to: string, text: string, parts?: BridlePart[]): Promise<void>
   onMessage(handler: (msg: IBridleMessageData) => Promise<void>): void
   streamSend?(to: string, streamer: (onChunk: (text: string) => void) => Promise<string>): Promise<void>
-}
-
-export interface IBridleImageData {
-  base64: string
-  mediaType: string
 }
 
 export interface IBridleMessageData {
   id: string
   text: string
+  parts: BridlePart[]
   from: string
   channel: string
   ts: number
-  images?: IBridleImageData[]
   metadata?: Record<string, unknown>
 }
 
+// ── Repository ───────────────────────────────────────────────
+
 /**
- * Web channel — agent connects TO the NestJS API (bridle hub) as a socket.io client.
- * The API is the hub between browser users and the agent.
+ * Bridle channel — agent connects TO the Bridle hub as a socket.io client.
+ * The hub relays messages between browser users and this agent.
  *
- * Flow:  Browser ↔ /ws/chat ↔ NestJS Hub ↔ /ws/agent ↔ Agent (this)
+ * Flow:  Browser ↔ /ws/chat ↔ Bridle Hub ↔ /ws/agent ↔ Agent (this)
  *
  * Events (Hub → Agent):
- *   "message"  { clientId, text, messageId, images? }
+ *   "message"  { clientId, text, parts, messageId }
  *   "pong"     {}
  *
  * Events (Agent → Hub):
  *   "register"     {}
- *   "message"      { clientId, text, messageId, ts }
- *   "stream"       { clientId, text, messageId, ts }
- *   "stream_end"   { clientId, text, messageId, ts }
+ *   "message"      { clientId, text, parts, messageId, ts }
+ *   "stream"       { clientId, text, parts, messageId, ts }
+ *   "stream_end"   { clientId, text, parts, messageId, ts }
  *   "typing"       { clientId, ts }
  *   "ping"         {}
  */
@@ -58,8 +81,6 @@ export class BridleRepository implements IChannelGateway {
     this.apiUrl = apiUrl
   }
 
-  // ── IChannelGateway implementation ──────────────────────────
-
   async start(): Promise<void> {
     this.connect()
   }
@@ -70,10 +91,12 @@ export class BridleRepository implements IChannelGateway {
     console.log('[bridle] channel stopped')
   }
 
-  async send(to: string, text: string): Promise<void> {
+  async send(to: string, text: string, parts?: BridlePart[]): Promise<void> {
+    const resolvedParts = parts ?? (text ? [{ type: BridlePartTypes.Text as const, text }] : [])
     this.socket?.emit('message', {
       clientId: to,
       text,
+      parts: resolvedParts,
       messageId: randomUUID(),
       ts: Date.now(),
     })
@@ -101,7 +124,13 @@ export class BridleRepository implements IChannelGateway {
       if (sending || pendingText === lastSent) return
       sending = true
       const toSend = pendingText
-      this.socket?.emit('stream', { clientId: to, text: toSend, messageId, ts: Date.now() })
+      this.socket?.emit('stream', {
+        clientId: to,
+        text: toSend,
+        parts: [{ type: BridlePartTypes.Text, text: toSend }],
+        messageId,
+        ts: Date.now(),
+      })
       lastSent = toSend
       sending = false
     }
@@ -115,15 +144,19 @@ export class BridleRepository implements IChannelGateway {
       })
     } finally {
       clearInterval(interval)
-      this.socket?.emit('stream_end', { clientId: to, text: finalText, messageId, ts: Date.now() })
+      this.socket?.emit('stream_end', {
+        clientId: to,
+        text: finalText,
+        parts: [{ type: BridlePartTypes.Text, text: finalText }],
+        messageId,
+        ts: Date.now(),
+      })
     }
   }
 
-  // ── Socket.io client ───────────────────────────────────────
-
   private connect(): void {
     const url = this.apiUrl
-    console.log(`[bridle] connecting to API at ${url}/ws/agent`)
+    console.log(`[bridle] connecting to hub at ${url}/ws/agent`)
 
     this.socket = io(`${url}/ws/agent`, {
       transports: ['websocket'],
@@ -137,35 +170,33 @@ export class BridleRepository implements IChannelGateway {
     })
 
     this.socket.on('connect', () => {
-      console.log('[bridle] connected to API')
+      console.log('[bridle] connected to hub')
       this.socket?.emit('register', {})
     })
 
     this.socket.on('disconnect', (reason) => {
-      console.log(`[bridle] disconnected from API: ${reason}`)
+      console.log(`[bridle] disconnected from hub: ${reason}`)
     })
 
     this.socket.on('reconnect', () => {
-      console.log('[bridle] reconnected to API')
+      console.log('[bridle] reconnected to hub')
       this.socket?.emit('register', {})
     })
 
-    // Incoming messages from browser clients (routed via hub)
     this.socket.on('message', (data: unknown) => {
       const msg = data as Record<string, unknown>
-      if (!msg?.text || !msg?.clientId || !this.handler) return
+      if (!msg?.clientId || !this.handler) return
 
-      const images = Array.isArray(msg.images)
-        ? (msg.images as Array<Record<string, unknown>>).filter((img) => img.base64 && img.mediaType) as unknown as IBridleImageData[]
-        : undefined
+      const text = (msg.text as string) ?? ''
+      const parts = (msg.parts as BridlePart[]) ?? (text ? [{ type: BridlePartTypes.Text, text }] : [])
 
       this.handler({
         id: (msg.messageId as string) ?? randomUUID(),
-        text: msg.text as string,
+        text,
+        parts,
         from: msg.clientId as string,
         channel: 'bridle',
         ts: Date.now(),
-        ...(images?.length ? { images } : {}),
         metadata: { clientId: msg.clientId, source: 'bridle' },
       }).catch(err => console.error('[bridle] handler error:', err))
     })

@@ -10,7 +10,7 @@ import {
 import { Logger } from '@nestjs/common'
 import { JwtService } from '@nestjs/jwt'
 import { Server, Socket } from 'socket.io'
-import { IBridleGateway } from '../domain'
+import { IBridleGateway, type BridlePart, buildParts } from '../domain'
 
 /**
  * WebSocket gateway for BROWSER clients.
@@ -93,13 +93,17 @@ export class BridleChatWsHandler implements OnGatewayConnection, OnGatewayDiscon
   @SubscribeMessage('message')
   handleMessage(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { text?: string; images?: Array<{ base64: string; mediaType: string }> },
+    @MessageBody() data: { text?: string; parts?: BridlePart[]; images?: Array<{ base64: string; mediaType: string }> },
   ) {
     const clientId = client.data?.clientId as string
     const botId = client.data?.botId as string
-    if (!clientId || !botId || !data?.text) return
+    if (!clientId || !botId) return
 
-    this.hub.sendToAgent(clientId, botId, data.text, data.images)
+    const text = data.text ?? ''
+    const parts = data.parts ?? buildParts(text, data.images)
+    if (!text && parts.length === 0) return
+
+    this.hub.sendToAgent(clientId, botId, text, parts)
   }
 
   @SubscribeMessage('ping')

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import type { IBridleMessageData } from '../../stores/bridle'
-import { Bot, User } from 'lucide-vue-next'
+import { BridlePartTypes, type IBridleMessageData } from '../../stores/bridle'
+import { Bot, User, FileText } from 'lucide-vue-next'
 import { cn } from '#theme/utils/cn'
 
 defineProps<{
@@ -27,14 +27,37 @@ defineProps<{
 
     <div
       :class="cn(
-        'rounded-lg px-3 py-2 text-sm whitespace-pre-wrap break-words',
+        'rounded-lg px-3 py-2 text-sm space-y-2',
         message.role === 'user'
           ? 'bg-primary text-primary-foreground'
           : 'bg-muted',
         message.streaming && 'border-l-2 border-primary',
       )"
     >
-      {{ message.text }}
+      <template v-for="(part, i) in message.parts" :key="i">
+        <p v-if="part.type === BridlePartTypes.Text" class="whitespace-pre-wrap break-words">{{ part.text }}</p>
+
+        <img
+          v-else-if="part.type === BridlePartTypes.Image"
+          :src="`data:${part.mediaType};base64,${part.base64}`"
+          :alt="`Image ${i + 1}`"
+          class="max-w-full rounded"
+        />
+
+        <a
+          v-else-if="part.type === BridlePartTypes.File"
+          :href="part.url"
+          target="_blank"
+          rel="noopener"
+          class="flex items-center gap-2 px-2 py-1 rounded border text-xs hover:bg-background/50"
+        >
+          <FileText class="h-3.5 w-3.5 shrink-0" />
+          <span class="truncate">{{ part.name }}</span>
+        </a>
+      </template>
+
+      <!-- Fallback: if no parts, show plain text -->
+      <p v-if="message.parts.length === 0" class="whitespace-pre-wrap break-words">{{ message.text }}</p>
     </div>
   </div>
 </template>

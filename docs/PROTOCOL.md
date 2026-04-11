@@ -6,12 +6,59 @@ Bridle connects browser users to an agent runtime through a stateless relay hub.
 Browser (Nuxt UI)             Bridle Hub (NestJS)           Agent Runtime
      |                             |                             |
      |--- Socket.IO /ws/chat ----->|                             |
-     |                             |--- Socket.IO /ws/agent ---->|
-     |                             |                             |
+     |   auth: { token, botId }    |--- Socket.IO /ws/agent ---->|
+     |                             |   auth: { apiKey, botId }   |
      |<--- stream/message ---------|<--- stream/message ---------|
+     |   { text, parts[] }         |   { text, parts[] }         |
 ```
 
 The hub is stateless -- it does not store messages or conversation history.
+
+---
+
+## Message Parts
+
+All messages carry a `parts` array for rich content. The `text` field is always present as a plain-text shorthand.
+
+### Part Types
+
+```typescript
+enum BridlePartTypes {
+  Text = 'text',
+  Image = 'image',
+  File = 'file',
+}
+```
+
+### Text Part
+
+```json
+{ "type": "text", "text": "Hello, how can I help?" }
+```
+
+### Image Part
+
+```json
+{ "type": "image", "base64": "<base64-encoded>", "mediaType": "image/jpeg" }
+```
+
+Supported media types: `image/jpeg`, `image/png`, `image/gif`, `image/webp`.
+
+### File Part
+
+```json
+{ "type": "file", "url": "https://example.com/doc.pdf", "name": "doc.pdf", "mimeType": "application/pdf" }
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `url` | string | yes | URL to download the file |
+| `name` | string | yes | Display name |
+| `mimeType` | string | no | MIME type hint |
+
+### Backward Compatibility
+
+Clients may omit `parts` and send `text` + `images` instead. The hub converts this to parts via `buildParts(text, images)`. All receivers fall back gracefully: if `parts` is missing, they build it from `text`.
 
 ---
 
@@ -19,15 +66,15 @@ The hub is stateless -- it does not store messages or conversation history.
 
 Three participants, two connections:
 
-| Connection | Transport | Direction |
-|---|---|---|
-| Browser <-> Hub | Socket.IO `/ws/chat` | Bidirectional |
-| Agent <-> Hub | Socket.IO `/ws/agent` | Bidirectional |
+| Connection | Transport | Auth | Direction |
+|---|---|---|---|
+| Browser <-> Hub | Socket.IO `/ws/chat` | JWT + botId | Bidirectional |
+| Agent <-> Hub | Socket.IO `/ws/agent` | apiKey + botId | Bidirectional |
 
-The hub assigns each browser a unique `clientId` (UUID v4) on connection.
-All messages between hub and agent include `clientId` for routing.
+The hub assigns each browser a `clientId` on connection (from JWT `sub`, or `'admin'` for admin users).
+All messages between hub and agent include `clientId` and `botId` for routing.
 
-Only **one agent** can be connected at a time. Multiple browsers can connect simultaneously.
+Multiple agents can connect (one per `botId`). Multiple browsers can connect simultaneously.
 
 ---
 
@@ -35,42 +82,55 @@ Only **one agent** can be connected at a time. Multiple browsers can connect sim
 
 **Namespace:** `/ws/chat`
 **Transport:** Socket.IO (WebSocket upgrade)
-**Auth:** None (CORS: `*`)
+**Auth:** JWT token + botId in handshake
+
+### Authentication
+
+```typescript
+io('http://hub-host/ws/chat', {
+  auth: {
+    token: '<JWT>',       // Verified by JwtService
+    botId: 'bot-abc-123', // Which bot to chat with
+  },
+})
+```
+
+If `token` or `botId` is missing, or the JWT is invalid, the client is disconnected immediately.
+
+Admin detection: if JWT `roles` includes `'ADMIN'`, `clientId` is set to `'admin'`.
 
 ### Lifecycle
 
 ```
-1. Browser connects to /ws/chat
-2. Hub generates clientId (UUID v4), registers browser
-3. Hub emits  welcome { clientId }  to browser
-4. Browser sends/receives messages
-5. On disconnect, hub unregisters the clientId
+1. Browser connects to /ws/chat with { token, botId }
+2. Hub verifies JWT, extracts clientId from sub (or 'admin')
+3. Hub registers browser under botId
+4. Hub emits  welcome { clientId }  to browser
+5. Browser sends/receives messages
+6. On disconnect, hub unregisters the clientId
 ```
 
 ### Events: Browser -> Hub
 
 #### `message`
 
-Send a text message (optionally with images) to the agent.
+Send a message to the agent. Prefer `parts` for rich content; `text` + `images` is supported for backward compatibility.
 
 ```json
 {
   "text": "Hello, agent",
-  "images": [
-    {
-      "base64": "<base64-encoded image data>",
-      "mediaType": "image/jpeg"
-    }
+  "parts": [
+    { "type": "text", "text": "Hello, agent" },
+    { "type": "image", "base64": "<base64>", "mediaType": "image/jpeg" }
   ]
 }
 ```
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `text` | string | yes | Message text |
-| `images` | array | no | Attached images |
-| `images[].base64` | string | yes (if images) | Base64-encoded image data |
-| `images[].mediaType` | string | yes (if images) | `image/jpeg`, `image/png`, `image/gif`, `image/webp` |
+| `text` | string | yes | Plain-text shorthand |
+| `parts` | BridlePart[] | no | Rich content (source of truth). If omitted, built from text + images. |
+| `images` | array | no | Legacy: attached images. Converted to parts if `parts` is absent. |
 
 #### `ping`
 
@@ -84,7 +144,7 @@ Keepalive check. Hub responds with `pong`.
 
 #### `welcome`
 
-Sent immediately on connection. Contains the assigned client ID.
+Sent immediately on connection.
 
 ```json
 {
@@ -100,6 +160,9 @@ Complete (non-streamed) response from the agent.
 {
   "type": "message",
   "text": "Hello! How can I help you?",
+  "parts": [
+    { "type": "text", "text": "Hello! How can I help you?" }
+  ],
   "messageId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
   "ts": 1712847600000
 }
@@ -118,27 +181,33 @@ Agent has started processing. Display as a typing indicator.
 
 #### `stream`
 
-Partial response chunk. The `text` field contains the **accumulated text so far** (not a delta).
+Partial response chunk. Both `text` and `parts` contain the **accumulated content so far** (not a delta).
 
 ```json
 {
   "type": "stream",
   "text": "Hello! How can I",
+  "parts": [
+    { "type": "text", "text": "Hello! How can I" }
+  ],
   "messageId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
   "ts": 1712847600100
 }
 ```
 
-> **Important:** Each `stream` event contains the full accumulated text up to that point. The client must **replace** the entire message text, not append.
+> **Important:** Each `stream` event contains the full accumulated state. The client must **replace** the entire message, not append.
 
 #### `stream_end`
 
-Final chunk. Marks the end of streaming. The `text` field contains the complete response.
+Final chunk. Marks the end of streaming.
 
 ```json
 {
   "type": "stream_end",
   "text": "Hello! How can I help you today?",
+  "parts": [
+    { "type": "text", "text": "Hello! How can I help you today?" }
+  ],
   "messageId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
   "ts": 1712847600200
 }
@@ -160,10 +229,9 @@ Response to `ping`.
 
 **Namespace:** `/ws/agent`
 **Transport:** Socket.IO (WebSocket upgrade)
+**Auth:** apiKey + botId in handshake
 
 ### Authentication
-
-Agent connects with auth credentials in the Socket.IO handshake:
 
 ```typescript
 io('http://hub-host/ws/agent', {
@@ -174,20 +242,18 @@ io('http://hub-host/ws/agent', {
 })
 ```
 
-Both fields are optional. The hub accepts the connection regardless but the fields are available for middleware auth guards.
+`apiKey` is validated against `BRIDLE_API_KEY` env var. If missing or wrong, the connection is rejected. `botId` is required -- it scopes all routing. Multiple agents can connect (one per `botId`).
 
 ### Lifecycle
 
 ```
-1. Agent connects to /ws/agent
-2. Hub registers the agent immediately
+1. Agent connects to /ws/agent with { apiKey, botId }
+2. Hub validates apiKey, registers agent under botId
 3. Agent emits  register {}  to confirm readiness
-4. Hub forwards browser messages to agent
-5. Agent sends responses back through hub to the correct browser
-6. On disconnect, hub marks agent as unavailable
+4. Hub forwards browser messages (matching botId) to agent
+5. Agent sends responses back through hub
+6. On disconnect, hub unregisters that botId
 ```
-
-Only **one agent** can be connected at a time. A new agent connection replaces the previous one.
 
 ### Events: Hub -> Agent
 
@@ -200,13 +266,11 @@ A browser user sent a message. Agent should process it and respond.
   "type": "message",
   "clientId": "550e8400-e29b-41d4-a716-446655440000",
   "text": "Hello, agent",
-  "messageId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
-  "images": [
-    {
-      "base64": "<base64-encoded image data>",
-      "mediaType": "image/jpeg"
-    }
-  ]
+  "parts": [
+    { "type": "text", "text": "Hello, agent" },
+    { "type": "image", "base64": "<base64>", "mediaType": "image/jpeg" }
+  ],
+  "messageId": "7c9e6679-7425-40de-944b-e07fc1f90ae7"
 }
 ```
 
@@ -214,11 +278,9 @@ A browser user sent a message. Agent should process it and respond.
 |---|---|---|---|
 | `type` | `"message"` | yes | Always `"message"` |
 | `clientId` | string | yes | Browser client to respond to |
-| `text` | string | yes | User's message text |
+| `text` | string | yes | Plain-text shorthand |
+| `parts` | BridlePart[] | yes | Rich content parts |
 | `messageId` | string | yes | UUID v4 for this message |
-| `images` | array | no | User's attached images |
-| `images[].base64` | string | yes (if images) | Base64-encoded image data |
-| `images[].mediaType` | string | yes (if images) | MIME type |
 
 #### `pong`
 
@@ -242,12 +304,16 @@ Agent announces it is ready. Sent after connection or reconnection.
 
 #### `message`
 
-Complete (non-streamed) response. Use this for short responses where streaming adds no value.
+Complete (non-streamed) response with rich parts.
 
 ```json
 {
   "clientId": "550e8400-e29b-41d4-a716-446655440000",
-  "text": "Hello! How can I help you?",
+  "text": "Here is the result:",
+  "parts": [
+    { "type": "text", "text": "Here is the result:" },
+    { "type": "image", "base64": "<base64>", "mediaType": "image/png" }
+  ],
   "messageId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
   "ts": 1712847600000
 }
@@ -255,7 +321,7 @@ Complete (non-streamed) response. Use this for short responses where streaming a
 
 #### `typing`
 
-Agent is about to start generating a response. Hub forwards to the browser as a typing indicator.
+Agent is about to start generating a response.
 
 ```json
 {
@@ -266,12 +332,15 @@ Agent is about to start generating a response. Hub forwards to the browser as a 
 
 #### `stream`
 
-Partial response. `text` is the **accumulated text so far** (not a delta).
+Partial response. Both `text` and `parts` are **accumulated so far**.
 
 ```json
 {
   "clientId": "550e8400-e29b-41d4-a716-446655440000",
   "text": "Hello! How can I",
+  "parts": [
+    { "type": "text", "text": "Hello! How can I" }
+  ],
   "messageId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
   "ts": 1712847600100
 }
@@ -279,12 +348,15 @@ Partial response. `text` is the **accumulated text so far** (not a delta).
 
 #### `stream_end`
 
-Final response text. Marks the end of streaming.
+Final response.
 
 ```json
 {
   "clientId": "550e8400-e29b-41d4-a716-446655440000",
   "text": "Hello! How can I help you today?",
+  "parts": [
+    { "type": "text", "text": "Hello! How can I help you today?" }
+  ],
   "messageId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
   "ts": 1712847600200
 }
@@ -306,7 +378,7 @@ For clients that cannot use WebSocket.
 
 **Base path:** `/api/agent`
 
-### POST /api/agent/message
+### POST /api/agent/:botId/message
 
 Fire-and-forget. Sends a message to the agent but does not wait for a response.
 
@@ -314,20 +386,20 @@ Fire-and-forget. Sends a message to the agent but does not wait for a response.
 ```json
 {
   "text": "Hello, agent",
-  "images": [
-    { "base64": "...", "mediaType": "image/jpeg" }
+  "parts": [
+    { "type": "text", "text": "Hello, agent" }
   ]
 }
 ```
+
+`parts` is optional. If omitted, built from `text` + `images`.
 
 **Response:** `200 OK`
 ```json
 { "ok": true }
 ```
 
-If no agent is connected, the hub silently drops the message (no error).
-
-### POST /api/agent/message/sync
+### POST /api/agent/:botId/message/sync
 
 Synchronous. Sends a message and waits for the complete agent response.
 
@@ -337,8 +409,8 @@ Synchronous. Sends a message and waits for the complete agent response.
 ```json
 {
   "text": "Hello, agent",
-  "images": [
-    { "base64": "...", "mediaType": "image/jpeg" }
+  "parts": [
+    { "type": "text", "text": "Hello, agent" }
   ]
 }
 ```
@@ -363,7 +435,7 @@ On timeout:
 
 ### GET /api/agent/health
 
-Check hub and agent connection status.
+Check overall hub status.
 
 **Response:** `200 OK`
 ```json
@@ -374,24 +446,37 @@ Check hub and agent connection status.
 }
 ```
 
+### GET /api/agent/:botId/health
+
+Check per-bot status.
+
+**Response:** `200 OK`
+```json
+{
+  "ok": true,
+  "agentConnected": true,
+  "browserClients": 1
+}
+```
+
 ---
 
 ## Streaming Model
 
 Bridle uses **accumulated text**, not deltas.
 
-Each `stream` event contains the full response text generated so far:
+Each `stream` event contains the full response generated so far:
 
 ```
-stream #1:  text = "Hello"
-stream #2:  text = "Hello, how"
-stream #3:  text = "Hello, how are you?"
-stream_end: text = "Hello, how are you?"
+stream #1:  text = "Hello"           parts = [{ type: "text", text: "Hello" }]
+stream #2:  text = "Hello, how"      parts = [{ type: "text", text: "Hello, how" }]
+stream #3:  text = "Hello, how are?" parts = [{ type: "text", text: "Hello, how are?" }]
+stream_end: text = "Hello, how are?" parts = [{ type: "text", text: "Hello, how are?" }]
 ```
 
 ### Client implementation
 
-On each `stream` event, **replace** the entire message text. Do not append.
+On each `stream` event, **replace** the entire message (both `text` and `parts`). Do not append.
 
 ### Agent implementation
 
@@ -412,7 +497,7 @@ await bridle.streamSend(clientId, async (onChunk) => {
 
 | | Accumulated (Bridle) | Delta-based (e.g. Vercel AI SDK) |
 |---|---|---|
-| Client complexity | Low -- just replace text | Higher -- must concatenate deltas |
+| Client complexity | Low -- just replace text + parts | Higher -- must concatenate deltas |
 | Bandwidth | O(n^2) over response length | O(n) |
 | Missed events | Self-healing -- next event has full state | Data loss -- gaps are permanent |
 | Late joiners | Can pick up from any event | Need full history |
@@ -423,13 +508,34 @@ The accumulated approach prioritizes simplicity and resilience over bandwidth ef
 
 ## Type Definitions
 
-### IBridleImageData
+### BridlePart (wire format)
 
 ```typescript
-interface IBridleImageData {
-  base64: string    // Base64-encoded image data
-  mediaType: string // "image/jpeg" | "image/png" | "image/gif" | "image/webp"
+enum BridlePartTypes {
+  Text = 'text',
+  Image = 'image',
+  File = 'file',
 }
+
+interface IBridleTextPart {
+  type: BridlePartTypes.Text
+  text: string
+}
+
+interface IBridleImagePart {
+  type: BridlePartTypes.Image
+  base64: string
+  mediaType: string  // "image/jpeg" | "image/png" | "image/gif" | "image/webp"
+}
+
+interface IBridleFilePart {
+  type: BridlePartTypes.File
+  url: string
+  name: string
+  mimeType?: string
+}
+
+type BridlePart = IBridleTextPart | IBridleImagePart | IBridleFilePart
 ```
 
 ### IBridleIncomingMessage (Hub -> Agent)
@@ -437,10 +543,11 @@ interface IBridleImageData {
 ```typescript
 interface IBridleIncomingMessage {
   type: 'message'
-  clientId: string        // Target browser client
-  text: string            // User's message text
-  messageId: string       // UUID v4
-  images?: IBridleImageData[]
+  clientId: string
+  botId: string
+  text: string
+  parts: BridlePart[]
+  messageId: string
 }
 ```
 
@@ -449,10 +556,11 @@ interface IBridleIncomingMessage {
 ```typescript
 interface IBridleOutgoingEvent {
   type: 'register' | 'message' | 'stream' | 'stream_end' | 'typing' | 'ping'
-  clientId?: string       // Required for message/stream/stream_end/typing
-  text?: string           // Response text
-  messageId?: string      // UUID v4, consistent across stream chunks
-  ts?: number             // Unix timestamp in milliseconds
+  clientId?: string
+  text?: string
+  parts?: BridlePart[]
+  messageId?: string
+  ts?: number
 }
 ```
 
@@ -461,8 +569,8 @@ interface IBridleOutgoingEvent {
 ```typescript
 interface IBridleHealthData {
   ok: boolean
-  agentConnected: boolean  // Whether the agent runtime is connected
-  browserClients: number   // Number of connected browsers
+  agentConnected: boolean
+  browserClients: number
 }
 ```
 
@@ -473,8 +581,9 @@ interface IBridleMessageData {
   id: string
   role: 'user' | 'assistant'
   text: string
+  parts: BridlePart[]
   ts: number
-  streaming?: boolean      // True while stream events are arriving
+  streaming?: boolean
 }
 ```
 
@@ -493,18 +602,20 @@ interface IBridleMessageData {
 
 ## Sequence Diagrams
 
-### Normal message (no streaming)
+### Normal message with parts
 
 ```
 Browser              Hub                 Agent
    |                  |                    |
    |-- message ------>|                    |
-   |  { text }        |-- message -------->|
-   |                  |  { clientId, text } |
+   |  { text, parts } |-- message -------->|
+   |                  |  { clientId, text,  |
+   |                  |    parts }          |
    |                  |                    |  (processing)
    |                  |<-- message --------|
-   |<-- message ------|  { clientId, text } |
-   |  { text, ts }    |                    |
+   |<-- message ------|  { text, parts,    |
+   |  { text, parts,  |    clientId }       |
+   |    ts }           |                    |
 ```
 
 ### Streamed response
@@ -513,19 +624,34 @@ Browser              Hub                 Agent
 Browser              Hub                 Agent
    |                  |                    |
    |-- message ------>|                    |
-   |                  |-- message -------->|
+   |  { text, parts } |-- message -------->|
    |                  |                    |
    |                  |<-- typing ---------|
    |<-- typing -------|                    |
    |                  |                    |
    |                  |<-- stream ---------|  (100ms flush)
-   |<-- stream -------|  { text: "Hi" }    |
+   |<-- stream -------|  { text, parts }   |
    |                  |                    |
    |                  |<-- stream ---------|  (100ms flush)
-   |<-- stream -------|  { text: "Hi there" }
+   |<-- stream -------|  { text, parts }   |
    |                  |                    |
    |                  |<-- stream_end -----|
-   |<-- stream_end ---|  { text: "Hi there!" }
+   |<-- stream_end ---|  { text, parts }   |
+```
+
+### Rich response (text + image)
+
+```
+Browser              Hub                 Agent
+   |                  |                    |
+   |-- message ------>|                    |
+   |  { text, parts:  |                    |
+   |    [text] }       |-- message -------->|
+   |                  |                    |  (processing)
+   |                  |<-- message --------|
+   |<-- message ------|  { text, parts:    |
+   |  { text, parts:  |    [text, image] } |
+   |    [text, image] }|                    |
 ```
 
 ### Agent unavailable
@@ -534,9 +660,10 @@ Browser              Hub                 Agent
 Browser              Hub
    |                  |
    |-- message ------>|
-   |                  |  (no agent connected)
+   |                  |  (no agent for this botId)
    |<-- message ------|
-   |  { text: "Agent is not connected. Please try again later." }
+   |  { text: "Agent is not connected...",
+   |    parts: [{ type: "text", text: "Agent is not connected..." }] }
 ```
 
 ### HTTP sync fallback
@@ -544,8 +671,8 @@ Browser              Hub
 ```
 HTTP Client                   Hub                 Agent
    |                           |                    |
-   |-- POST /message/sync ---->|                    |
-   |                           |-- message -------->|
+   |-- POST /:botId/message -->|                    |
+   |   /sync  { text, parts }  |-- message -------->|
    |                           |                    |  (processing)
    |                           |<-- message --------|
    |<-- 200 { text, ts } ------|                    |

@@ -1,12 +1,50 @@
 import { defineStore } from 'pinia'
 import { io, type Socket } from 'socket.io-client'
 
+export enum BridlePartTypes {
+  Text = 'text',
+  Image = 'image',
+  File = 'file',
+}
+
+export interface IBridleTextPart {
+  type: BridlePartTypes.Text
+  text: string
+}
+
+export interface IBridleImagePart {
+  type: BridlePartTypes.Image
+  base64: string
+  mediaType: string
+}
+
+export interface IBridleFilePart {
+  type: BridlePartTypes.File
+  url: string
+  name: string
+  mimeType?: string
+}
+
+export type BridlePart = IBridleTextPart | IBridleImagePart | IBridleFilePart
+
 export interface IBridleMessageData {
   id: string
   role: 'user' | 'assistant'
   text: string
+  parts: BridlePart[]
   ts: number
   streaming?: boolean
+}
+
+function buildParts(text: string, images?: Array<{ base64: string; mediaType: string }>): BridlePart[] {
+  const parts: BridlePart[] = []
+  if (text) parts.push({ type: BridlePartTypes.Text, text })
+  if (images) {
+    for (const img of images) {
+      parts.push({ type: BridlePartTypes.Image, base64: img.base64, mediaType: img.mediaType })
+    }
+  }
+  return parts
 }
 
 export const useBridleStore = defineStore('bridle', {
@@ -52,12 +90,15 @@ export const useBridleStore = defineStore('bridle', {
         this.clientId = data.clientId
       })
 
-      socket.on('message', (data: { text?: string; messageId?: string; ts?: number }) => {
+      socket.on('message', (data: { text?: string; parts?: BridlePart[]; messageId?: string; ts?: number }) => {
         this.isTyping = false
+        const text = data.text ?? ''
+        const parts = data.parts ?? (text ? [{ type: BridlePartTypes.Text as const, text }] : [])
         this.messages.push({
           id: data.messageId ?? crypto.randomUUID(),
           role: 'assistant',
-          text: data.text ?? '',
+          text,
+          parts,
           ts: data.ts ?? Date.now(),
         })
       })
@@ -66,32 +107,38 @@ export const useBridleStore = defineStore('bridle', {
         this.isTyping = true
       })
 
-      socket.on('stream', (data: { text?: string; messageId?: string; ts?: number }) => {
+      socket.on('stream', (data: { text?: string; parts?: BridlePart[]; messageId?: string; ts?: number }) => {
         this.isTyping = false
+        const text = data.text ?? ''
+        const parts = data.parts ?? (text ? [{ type: BridlePartTypes.Text as const, text }] : [])
         const idx = this.messages.findIndex(m => m.id === data.messageId)
         if (idx >= 0) {
-          this.messages[idx] = { ...this.messages[idx], text: data.text ?? '', streaming: true }
+          this.messages[idx] = { ...this.messages[idx], text, parts, streaming: true }
         } else {
           this.messages.push({
             id: data.messageId ?? crypto.randomUUID(),
             role: 'assistant',
-            text: data.text ?? '',
+            text,
+            parts,
             ts: data.ts ?? Date.now(),
             streaming: true,
           })
         }
       })
 
-      socket.on('stream_end', (data: { text?: string; messageId?: string; ts?: number }) => {
+      socket.on('stream_end', (data: { text?: string; parts?: BridlePart[]; messageId?: string; ts?: number }) => {
         this.isTyping = false
+        const text = data.text ?? ''
+        const parts = data.parts ?? (text ? [{ type: BridlePartTypes.Text as const, text }] : [])
         const idx = this.messages.findIndex(m => m.id === data.messageId)
         if (idx >= 0) {
-          this.messages[idx] = { ...this.messages[idx], text: data.text ?? '', streaming: false }
+          this.messages[idx] = { ...this.messages[idx], text, parts, streaming: false }
         } else {
           this.messages.push({
             id: data.messageId ?? crypto.randomUUID(),
             role: 'assistant',
-            text: data.text ?? '',
+            text,
+            parts,
             ts: data.ts ?? Date.now(),
           })
         }
@@ -109,19 +156,19 @@ export const useBridleStore = defineStore('bridle', {
     sendMessage(text: string, images?: Array<{ base64: string; mediaType: string }>) {
       if (!text.trim()) return
 
+      const parts = buildParts(text.trim(), images)
+
       this.messages.push({
         id: crypto.randomUUID(),
         role: 'user',
         text: text.trim(),
+        parts,
         ts: Date.now(),
       })
 
       this.isTyping = true
 
-      this._socket?.emit('message', {
-        text: text.trim(),
-        ...(images?.length ? { images } : {}),
-      })
+      this._socket?.emit('message', { text: text.trim(), parts })
     },
 
     clearMessages() {

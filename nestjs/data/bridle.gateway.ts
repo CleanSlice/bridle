@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { IBridleGateway } from '../domain/bridle.gateway'
-import type { IBridleHealthData, IBridleImageData, IBridleOutgoingEvent, IBridleClientData } from '../domain/bridle.types'
+import type { IBridleHealthData, IBridleBotHealthData, IBridleOutgoingEvent, IBridleClientData, BridlePart } from '../domain/bridle.types'
 import { randomUUID } from 'crypto'
 
 /**
@@ -37,13 +37,14 @@ export class BridleGateway extends IBridleGateway {
     this.logger.log(`Browser client unregistered: ${clientId} (total: ${this.clients.size})`)
   }
 
-  sendToAgent(clientId: string, botId: string, text: string, images?: IBridleImageData[]): void {
+  sendToAgent(clientId: string, botId: string, text: string, parts: BridlePart[]): void {
     const agentSend = this.agents.get(botId)
     if (!agentSend) {
       this.logger.warn(`Cannot send to agent — not connected (botId=${botId})`)
       this.sendToClient(clientId, {
         type: 'message',
         text: 'Agent is not connected. Please try again later.',
+        parts: [{ type: 'text', text: 'Agent is not connected. Please try again later.' }],
         messageId: randomUUID(),
         ts: Date.now(),
       })
@@ -54,8 +55,8 @@ export class BridleGateway extends IBridleGateway {
       type: 'message',
       clientId,
       text,
+      parts,
       messageId: randomUUID(),
-      ...(images?.length ? { images } : {}),
     })
   }
 
@@ -84,7 +85,7 @@ export class BridleGateway extends IBridleGateway {
     }
   }
 
-  botHealth(botId: string): IBridleHealthData {
+  botHealth(botId: string): IBridleBotHealthData {
     let clientCount = 0
     for (const client of this.clients.values()) {
       if (client.botId === botId) clientCount++
@@ -93,6 +94,7 @@ export class BridleGateway extends IBridleGateway {
       ok: true,
       agentConnected: this.agents.has(botId),
       browserClients: clientCount,
+      botId,
     }
   }
 }
