@@ -131,8 +131,8 @@ export class BridleRepository implements IChannelGateway {
       reconnectionDelay: 3000,
       reconnectionAttempts: Infinity,
       auth: {
-        apiKey: process.env.WEB_API_KEY ?? process.env.INTERNAL_API_KEY ?? '',
-        botId: process.env.WEB_BOT_ID ?? process.env.BOT_ID ?? '',
+        apiKey: process.env.BRIDLE_API_KEY ?? '',
+        botId: process.env.BRIDLE_BOT_ID ?? '',
       },
     })
 

@@ -10,7 +10,7 @@ import {
 import { Logger } from '@nestjs/common'
 import { JwtService } from '@nestjs/jwt'
 import { Server, Socket } from 'socket.io'
-import { IBridleGateway } from './domain'
+import { IBridleGateway } from '../domain'
 
 /**
  * WebSocket gateway for BROWSER clients.
@@ -35,11 +35,11 @@ import { IBridleGateway } from './domain'
  *   "pong"        { ts }
  */
 @WebSocketGateway({ namespace: '/ws/chat', cors: { origin: '*' } })
-export class ChatWsGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class BridleChatWsHandler implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server
 
-  private readonly logger = new Logger(ChatWsGateway.name)
+  private readonly logger = new Logger(BridleChatWsHandler.name)
 
   constructor(
     private readonly hub: IBridleGateway,

@@ -15,6 +15,44 @@ Browser (Nuxt)               Bridle Hub (NestJS)           Agent Runtime
 
 The hub is **stateless** -- it holds no message history. It routes messages between browsers and agents in real time using Socket.IO. Multiple bots can connect simultaneously, each scoped by `botId`.
 
+## Quick Install
+
+Copy this prompt into Claude Code to add Bridle to your CleanSlice project:
+
+~~~
+Add the Bridle webchat to this project. The repo is at https://github.com/CleanSlice/bridle
+
+Steps:
+
+1. Clone the bridle repo next to this project (or reference it if already cloned).
+
+2. **NestJS API** — integrate the hub server:
+   - Copy `bridle/nestjs/` into `api/src/slices/bridle/`
+   - Import `BridleModule` in `app.module.ts`
+   - Install deps: `npm i @nestjs/websockets @nestjs/platform-socket.io socket.io @nestjs/jwt`
+   - Add to `.env`: `BRIDLE_API_KEY=<generate-a-secret>` and `JWT_SECRET=<your-jwt-secret>`
+   - The `#core` alias must resolve (for FlatResponse decorator). If it doesn't exist, remove the `FlatResponse` import and decorator from `bridle.controller.ts`
+
+3. **Nuxt App** — integrate the chat UI:
+   - Copy `bridle/nuxt/` into `app/slices/bridle/`
+   - Add the slice as a Nuxt layer in `app/nuxt.config.ts`: `extends: ['./slices/bridle']`
+   - Install deps: `npm i socket.io-client`
+   - Use the component: `<BridleProvider api-url="http://localhost:3333" bot-id="my-bot" :token="authToken" />`
+   - The component imports from `#theme` (shadcn-vue Card, ScrollArea, etc). Make sure the theme slice exists or adapt imports.
+
+4. **Agent Runtime** — integrate the client:
+   - Copy `bridle/runtime/bridle.repository.ts` into the runtime's channel repositories
+   - Import and register `BridleRepository` as a channel with apiUrl from env
+   - Add to the bot's `.env`: `BRIDLE_URL=http://localhost:3333`, `BRIDLE_BOT_ID=<bot-id>`, `BRIDLE_API_KEY=<same-as-BRIDLE_API_KEY>`
+
+5. **Verify**:
+   - Start the API, confirm `/api/agent/health` returns `{ ok: true, agentConnected: false, browserClients: 0 }`
+   - Start the agent runtime, confirm it connects and `/api/agent/<botId>/health` shows `agentConnected: true`
+   - Open the Nuxt app with the BridleProvider component, confirm the chat connects and messages flow
+
+Read the bridle README.md and PROTOCOL.md for full auth details and type definitions.
+~~~
+
 ## Packages
 
 | Directory | Description | Stack |
@@ -34,13 +72,13 @@ Agent runtimes prove identity with a shared API key and declare which bot they s
 ```typescript
 io('http://hub-host/ws/agent', {
   auth: {
-    apiKey: process.env.INTERNAL_API_KEY,  // Shared secret
-    botId: process.env.WEB_BOT_ID,         // Which bot this agent serves
+    apiKey: process.env.BRIDLE_API_KEY,  // Shared secret
+    botId: process.env.BRIDLE_BOT_ID,         // Which bot this agent serves
   },
 })
 ```
 
-The hub validates `apiKey` against the `INTERNAL_API_KEY` environment variable. If the key is missing or wrong, the connection is rejected. `botId` is required -- it scopes all message routing to that bot.
+The hub validates `apiKey` against the `BRIDLE_API_KEY` environment variable. If the key is missing or wrong, the connection is rejected. `botId` is required -- it scopes all message routing to that bot.
 
 ### Browser auth (JWT + botId)
 
@@ -116,7 +154,7 @@ import { BridleModule } from 'bridle/nestjs'
 export class AppModule {}
 ```
 
-`BridleModule` imports `ConfigModule` (for `INTERNAL_API_KEY`) and `JwtModule` (for token verification). Your app must have `JWT_SECRET` configured.
+`BridleModule` imports `ConfigModule` (for `BRIDLE_API_KEY`) and `JwtModule` (for token verification). Your app must have `JWT_SECRET` configured.
 
 ### Exports
 
@@ -214,7 +252,7 @@ export default defineNuxtConfig({
 
 ## Agent Client (Runtime)
 
-`BridleRepository` connects to the hub as a Socket.IO client and implements the `IChannelGateway` interface. It authenticates using `WEB_API_KEY` and `WEB_BOT_ID` environment variables.
+`BridleRepository` connects to the hub as a Socket.IO client and implements the `IChannelGateway` interface. It authenticates using `BRIDLE_API_KEY` and `BRIDLE_BOT_ID` environment variables.
 
 ### Usage
 
@@ -244,8 +282,8 @@ The repository reads auth credentials from environment variables on connect:
 ```typescript
 // These are passed automatically in the Socket.IO handshake
 auth: {
-  apiKey: process.env.WEB_API_KEY ?? process.env.INTERNAL_API_KEY,
-  botId: process.env.WEB_BOT_ID ?? process.env.BOT_ID,
+  apiKey: process.env.BRIDLE_API_KEY,
+  botId: process.env.BRIDLE_BOT_ID,
 }
 ```
 
@@ -278,11 +316,10 @@ See [PROTOCOL.md](./docs/PROTOCOL.md) for the full specification including:
 
 | Variable | Where | Required | Description |
 |----------|-------|----------|-------------|
-| `INTERNAL_API_KEY` | Hub + Agent | yes | Shared secret for agent auth. Hub validates, agent sends. |
+| `BRIDLE_API_KEY` | Hub + Agent | yes | Shared secret for agent auth. Hub validates, agent sends. |
+| `BRIDLE_BOT_ID` | Agent | yes | Bot identifier sent in handshake |
+| `BRIDLE_URL` | Agent | yes | Hub URL, e.g. `http://localhost:3333` |
 | `JWT_SECRET` | Hub | yes | Secret for JWT verification of browser tokens |
-| `WEB_API_URL` | Agent | yes | Hub URL, e.g. `http://localhost:3333` |
-| `WEB_BOT_ID` | Agent | yes | Bot identifier sent in handshake |
-| `WEB_API_KEY` | Agent | no | Overrides `INTERNAL_API_KEY` for agent auth |
 
 ## Architecture
 
@@ -324,7 +361,7 @@ bridle/
 
 **Auth in handleConnection.** NestJS WS guards only run on `@SubscribeMessage`, not on connect. Checking auth in `handleConnection` + `client.disconnect(true)` ensures unauthorized clients never receive events.
 
-**Shared API key for agents.** All bot runtimes are deployed by the same system. `INTERNAL_API_KEY` provides authentication, `botId` provides identity. No need for per-bot tokens.
+**Shared API key for agents.** All bot runtimes are deployed by the same system. `BRIDLE_API_KEY` provides authentication, `botId` provides identity. No need for per-bot tokens.
 
 **JWT for browsers.** The admin panel already has a JWT flow. The token is passed in Socket.IO's `auth` field. Admin users (`roles: ['ADMIN']`) get `clientId = 'admin'` for runtime access control integration.
 

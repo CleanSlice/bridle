@@ -2,8 +2,7 @@ import { Module } from '@nestjs/common'
 import { ConfigModule } from '@nestjs/config'
 import { JwtModule } from '@nestjs/jwt'
 import { BridleController } from './bridle.controller'
-import { ChatWsGateway } from './bridle.chat-ws'
-import { AgentWsGateway } from './bridle.agent-ws'
+import { BridleChatWsHandler, BridleAgentWsHandler } from './handlers'
 import { IBridleGateway } from './domain'
 import { BridleGateway } from './data'
 
@@ -26,7 +25,7 @@ import { BridleGateway } from './data'
  * ```
  *
  * Requires:
- *   - ConfigModule (for INTERNAL_API_KEY)
+ *   - ConfigModule (for BRIDLE_API_KEY)
  *   - JwtModule (for browser JWT verification)
  *
  * WebSocket endpoints:
@@ -46,8 +45,8 @@ import { BridleGateway } from './data'
   ],
   providers: [
     { provide: IBridleGateway, useClass: BridleGateway },
-    ChatWsGateway,
-    AgentWsGateway,
+    BridleChatWsHandler,
+    BridleAgentWsHandler,
   ],
   controllers: [BridleController],
   exports: [IBridleGateway],

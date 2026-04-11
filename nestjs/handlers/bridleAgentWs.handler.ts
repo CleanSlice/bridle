@@ -9,14 +9,14 @@ import {
 import { Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { Socket } from 'socket.io'
-import { IBridleGateway, type IBridleOutgoingEvent } from './domain'
+import { IBridleGateway, type IBridleOutgoingEvent } from '../domain'
 
 /**
  * WebSocket gateway for AGENT runtime connections.
  * Agents connect here: ws://hub-host/ws/agent
  *
  * Auth: apiKey + botId in Socket.IO handshake.
- * apiKey must match INTERNAL_API_KEY env var.
+ * apiKey must match BRIDLE_API_KEY env var.
  * botId identifies which bot this agent serves.
  * Multiple agents can connect (one per botId).
  *
@@ -33,8 +33,8 @@ import { IBridleGateway, type IBridleOutgoingEvent } from './domain'
  *   "pong"        {}
  */
 @WebSocketGateway({ namespace: '/ws/agent', cors: { origin: '*' } })
-export class AgentWsGateway implements OnGatewayConnection, OnGatewayDisconnect {
-  private readonly logger = new Logger(AgentWsGateway.name)
+export class BridleAgentWsHandler implements OnGatewayConnection, OnGatewayDisconnect {
+  private readonly logger = new Logger(BridleAgentWsHandler.name)
 
   constructor(
     private readonly hub: IBridleGateway,
@@ -44,7 +44,7 @@ export class AgentWsGateway implements OnGatewayConnection, OnGatewayDisconnect 
   handleConnection(client: Socket) {
     const apiKey = client.handshake.auth?.apiKey as string | undefined
     const botId = client.handshake.auth?.botId as string | undefined
-    const expectedKey = this.config.get<string>('INTERNAL_API_KEY')
+    const expectedKey = this.config.get<string>('BRIDLE_API_KEY')
 
     if (!apiKey || !botId || apiKey !== expectedKey) {
       this.logger.warn(`Agent connection rejected: invalid credentials (botId: ${botId ?? 'none'})`)

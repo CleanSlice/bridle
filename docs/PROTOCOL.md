@@ -168,8 +168,8 @@ Agent connects with auth credentials in the Socket.IO handshake:
 ```typescript
 io('http://hub-host/ws/agent', {
   auth: {
-    apiKey: process.env.WEB_API_KEY,
-    botId: process.env.WEB_BOT_ID,
+    apiKey: process.env.BRIDLE_API_KEY,
+    botId: process.env.BRIDLE_BOT_ID,
   }
 })
 ```
@@ -484,9 +484,10 @@ interface IBridleMessageData {
 
 | Variable | Where | Required | Description |
 |---|---|---|---|
-| `WEB_API_URL` | Agent | yes | Hub URL, e.g. `http://localhost:3333` |
-| `WEB_API_KEY` | Agent | no | API key sent in Socket.IO auth handshake |
-| `WEB_BOT_ID` | Agent | no | Bot identifier sent in Socket.IO auth handshake |
+| `BRIDLE_API_KEY` | Hub + Agent | yes | Shared secret for agent auth. Hub validates, agent sends. |
+| `BRIDLE_BOT_ID` | Agent | yes | Bot identifier sent in Socket.IO auth handshake |
+| `BRIDLE_URL` | Agent | yes | Hub URL, e.g. `http://localhost:3333` |
+| `JWT_SECRET` | Hub | yes | Secret for JWT verification of browser tokens |
 
 ---
 
