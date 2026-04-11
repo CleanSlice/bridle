@@ -11,6 +11,8 @@ import { cn } from '#theme/utils/cn'
 
 const props = withDefaults(defineProps<{
   apiUrl: string
+  botId: string
+  token: string
   title?: string
   placeholder?: string
   class?: HTMLAttributes['class']
@@ -33,7 +35,7 @@ watch([messages, isTyping], async () => {
 }, { deep: true })
 
 onMounted(() => {
-  store.connect(props.apiUrl)
+  store.connect(props.apiUrl, props.botId, props.token)
 })
 
 onUnmounted(() => {

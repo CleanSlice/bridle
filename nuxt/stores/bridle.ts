@@ -25,13 +25,14 @@ export const useBridleStore = defineStore('bridle', {
   },
 
   actions: {
-    connect(apiUrl: string) {
+    connect(apiUrl: string, botId: string, token: string) {
       if (this._socket) return
 
       const socket = io(`${apiUrl}/ws/chat`, {
         transports: ['websocket'],
         reconnection: true,
         reconnectionDelay: 2000,
+        auth: { token, botId },
       })
 
       socket.on('connect', () => {
@@ -40,6 +41,11 @@ export const useBridleStore = defineStore('bridle', {
 
       socket.on('disconnect', () => {
         this.isConnected = false
+      })
+
+      socket.on('connect_error', (err) => {
+        this.isConnected = false
+        console.error('[bridle] connection error:', err.message)
       })
 
       socket.on('welcome', (data: { clientId: string }) => {

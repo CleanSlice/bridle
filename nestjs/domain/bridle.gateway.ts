@@ -1,24 +1,26 @@
 import type { IBridleHealthData, IBridleImageData, IBridleOutgoingEvent } from './bridle.types'
 
 /**
- * Hub gateway — manages connections from agent and browser clients.
- * Routes messages between them.
+ * Hub gateway — manages per-bot connections from agents and browser clients.
+ * Routes messages between them, scoped by botId.
  */
 export abstract class IBridleGateway {
-  /** Send a message from a browser client to the agent */
-  abstract sendToAgent(clientId: string, text: string, images?: IBridleImageData[]): void
-  /** Send an event from the agent to a specific browser client */
+  /** Send a message from a browser client to the agent for a specific bot */
+  abstract sendToAgent(clientId: string, botId: string, text: string, images?: IBridleImageData[]): void
+  /** Send an event to a specific browser client */
   abstract sendToClient(clientId: string, data: unknown): void
-  /** Register a browser client */
-  abstract registerClient(clientId: string, send: (data: unknown) => void): void
+  /** Register a browser client for a specific bot */
+  abstract registerClient(clientId: string, botId: string, send: (data: unknown) => void): void
   /** Unregister a browser client */
   abstract unregisterClient(clientId: string): void
-  /** Register the agent connection */
-  abstract registerAgent(send: (data: unknown) => void): void
-  /** Unregister the agent connection */
-  abstract unregisterAgent(): void
-  /** Handle an event from the agent — route it to the target browser client */
-  abstract handleAgentEvent(data: IBridleOutgoingEvent): void
-  /** Health status */
+  /** Register an agent connection for a specific bot */
+  abstract registerAgent(botId: string, send: (data: unknown) => void): void
+  /** Unregister an agent connection for a specific bot */
+  abstract unregisterAgent(botId: string): void
+  /** Handle an event from the agent — route to the target browser client for that bot */
+  abstract handleAgentEvent(botId: string, data: IBridleOutgoingEvent): void
+  /** Health status (all bots) */
   abstract health(): IBridleHealthData
+  /** Health status for a specific bot */
+  abstract botHealth(botId: string): IBridleHealthData
 }

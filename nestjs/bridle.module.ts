@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common'
+import { ConfigModule } from '@nestjs/config'
+import { JwtModule } from '@nestjs/jwt'
 import { BridleController } from './bridle.controller'
 import { ChatWsGateway } from './bridle.chat-ws'
 import { AgentWsGateway } from './bridle.agent-ws'
@@ -6,11 +8,11 @@ import { IBridleGateway } from './domain'
 import { BridleGateway } from './data'
 
 /**
- * Bridle Module — hub between browsers and the agent.
+ * Bridle Module — authenticated hub between browsers and bot agents.
  *
- * The agent connects to the API as a WS client on /ws/agent
- * Browsers connect on /ws/chat
- * The API routes messages between them.
+ * Bot agents connect via /ws/agent (auth: apiKey + botId).
+ * Browsers connect via /ws/chat (auth: JWT token + botId).
+ * Multiple bots can connect simultaneously — each scoped by botId.
  *
  * Usage:
  *
@@ -23,15 +25,25 @@ import { BridleGateway } from './data'
  * export class AppModule {}
  * ```
  *
+ * Requires:
+ *   - ConfigModule (for INTERNAL_API_KEY)
+ *   - JwtModule (for browser JWT verification)
+ *
  * WebSocket endpoints:
- *   /ws/agent  — agent runtime connection
- *   /ws/chat   — browser client connection
+ *   /ws/agent  — bot agent connection (apiKey + botId)
+ *   /ws/chat   — browser client connection (JWT + botId)
  *
  * HTTP endpoints:
- *   POST /api/agent/message  — HTTP fallback for sending messages
- *   GET  /api/agent/health   — agent connection status
+ *   POST /api/agent/:botId/message       — fire & forget
+ *   POST /api/agent/:botId/message/sync  — synchronous (120s timeout)
+ *   GET  /api/agent/health               — overall hub status
+ *   GET  /api/agent/:botId/health        — per-bot status
  */
 @Module({
+  imports: [
+    ConfigModule,
+    JwtModule.register({}),
+  ],
   providers: [
     { provide: IBridleGateway, useClass: BridleGateway },
     ChatWsGateway,

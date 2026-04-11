@@ -7,15 +7,21 @@ import {
   ConnectedSocket,
 } from '@nestjs/websockets'
 import { Logger } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
 import { Socket } from 'socket.io'
 import { IBridleGateway, type IBridleOutgoingEvent } from './domain'
 
 /**
- * WebSocket gateway for the AGENT runtime connection.
- * The agent connects here as a client: ws://api-host/ws/agent
+ * WebSocket gateway for AGENT runtime connections.
+ * Agents connect here: ws://hub-host/ws/agent
+ *
+ * Auth: apiKey + botId in Socket.IO handshake.
+ * apiKey must match INTERNAL_API_KEY env var.
+ * botId identifies which bot this agent serves.
+ * Multiple agents can connect (one per botId).
  *
  * Events (Agent → Hub):
- *   "register"    {}                                        — agent announces presence
+ *   "register"    {}
  *   "message"     { clientId, text, messageId, ts }
  *   "stream"      { clientId, text, messageId, ts }
  *   "stream_end"  { clientId, text, messageId, ts }
@@ -23,56 +29,77 @@ import { IBridleGateway, type IBridleOutgoingEvent } from './domain'
  *   "ping"        {}
  *
  * Events (Hub → Agent):
- *   "message"     { clientId, text, messageId, images? }   — user message to process
+ *   "message"     { clientId, text, messageId, images? }
  *   "pong"        {}
  */
 @WebSocketGateway({ namespace: '/ws/agent', cors: { origin: '*' } })
 export class AgentWsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly logger = new Logger(AgentWsGateway.name)
 
-  constructor(private readonly hub: IBridleGateway) {}
+  constructor(
+    private readonly hub: IBridleGateway,
+    private readonly config: ConfigService,
+  ) {}
 
   handleConnection(client: Socket) {
-    this.logger.log('Agent socket connected')
+    const apiKey = client.handshake.auth?.apiKey as string | undefined
+    const botId = client.handshake.auth?.botId as string | undefined
+    const expectedKey = this.config.get<string>('INTERNAL_API_KEY')
+
+    if (!apiKey || !botId || apiKey !== expectedKey) {
+      this.logger.warn(`Agent connection rejected: invalid credentials (botId: ${botId ?? 'none'})`)
+      client.disconnect(true)
+      return
+    }
+
+    client.data = { botId }
 
     const send = (data: unknown) => {
       const event = (data as Record<string, unknown>)?.type as string ?? 'data'
       client.emit(event, data)
     }
 
-    this.hub.registerAgent(send)
+    this.hub.registerAgent(botId, send)
+    this.logger.log(`Agent connected: botId=${botId}`)
   }
 
-  handleDisconnect() {
-    this.logger.warn('Agent socket disconnected')
-    this.hub.unregisterAgent()
+  handleDisconnect(client: Socket) {
+    const botId = client.data?.botId as string | undefined
+    if (botId) {
+      this.hub.unregisterAgent(botId)
+      this.logger.warn(`Agent disconnected: botId=${botId}`)
+    }
   }
 
   @SubscribeMessage('message')
-  handleMessage(@MessageBody() data: IBridleOutgoingEvent) {
-    if (data?.clientId) {
-      this.hub.handleAgentEvent({ ...data, type: 'message' })
+  handleMessage(@ConnectedSocket() client: Socket, @MessageBody() data: IBridleOutgoingEvent) {
+    const botId = client.data?.botId as string
+    if (data?.clientId && botId) {
+      this.hub.handleAgentEvent(botId, { ...data, type: 'message' })
     }
   }
 
   @SubscribeMessage('stream')
-  handleStream(@MessageBody() data: IBridleOutgoingEvent) {
-    if (data?.clientId) {
-      this.hub.handleAgentEvent({ ...data, type: 'stream' })
+  handleStream(@ConnectedSocket() client: Socket, @MessageBody() data: IBridleOutgoingEvent) {
+    const botId = client.data?.botId as string
+    if (data?.clientId && botId) {
+      this.hub.handleAgentEvent(botId, { ...data, type: 'stream' })
     }
   }
 
   @SubscribeMessage('stream_end')
-  handleStreamEnd(@MessageBody() data: IBridleOutgoingEvent) {
-    if (data?.clientId) {
-      this.hub.handleAgentEvent({ ...data, type: 'stream_end' })
+  handleStreamEnd(@ConnectedSocket() client: Socket, @MessageBody() data: IBridleOutgoingEvent) {
+    const botId = client.data?.botId as string
+    if (data?.clientId && botId) {
+      this.hub.handleAgentEvent(botId, { ...data, type: 'stream_end' })
     }
   }
 
   @SubscribeMessage('typing')
-  handleTyping(@MessageBody() data: IBridleOutgoingEvent) {
-    if (data?.clientId) {
-      this.hub.handleAgentEvent({ ...data, type: 'typing' })
+  handleTyping(@ConnectedSocket() client: Socket, @MessageBody() data: IBridleOutgoingEvent) {
+    const botId = client.data?.botId as string
+    if (data?.clientId && botId) {
+      this.hub.handleAgentEvent(botId, { ...data, type: 'typing' })
     }
   }
 

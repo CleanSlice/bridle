@@ -1,25 +1,35 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { IBridleGateway } from '../domain/bridle.gateway'
-import type { IBridleHealthData, IBridleImageData, IBridleOutgoingEvent } from '../domain/bridle.types'
+import type { IBridleHealthData, IBridleImageData, IBridleOutgoingEvent, IBridleClientData } from '../domain/bridle.types'
 import { randomUUID } from 'crypto'
 
 /**
- * Hub implementation — holds references to the agent WS connection
- * and all browser client WS connections, routes messages between them.
+ * Hub implementation — manages per-bot agent connections and per-bot browser
+ * client connections. Routes messages between them scoped by botId.
  */
 @Injectable()
 export class BridleGateway extends IBridleGateway {
   private readonly logger = new Logger(BridleGateway.name)
 
-  /** Browser clients: clientId → send function */
-  private clients = new Map<string, (data: unknown) => void>()
+  /** Agent connections: botId → send function */
+  private agents = new Map<string, (data: unknown) => void>()
 
-  /** Agent send function (null if agent not connected) */
-  private agentSend: ((data: unknown) => void) | null = null
+  /** Browser clients: clientId → { botId, send } */
+  private clients = new Map<string, IBridleClientData>()
 
-  registerClient(clientId: string, send: (data: unknown) => void): void {
-    this.clients.set(clientId, send)
-    this.logger.log(`Browser client registered: ${clientId} (total: ${this.clients.size})`)
+  registerAgent(botId: string, send: (data: unknown) => void): void {
+    this.agents.set(botId, send)
+    this.logger.log(`Agent registered: botId=${botId} (total agents: ${this.agents.size})`)
+  }
+
+  unregisterAgent(botId: string): void {
+    this.agents.delete(botId)
+    this.logger.warn(`Agent unregistered: botId=${botId} (total agents: ${this.agents.size})`)
+  }
+
+  registerClient(clientId: string, botId: string, send: (data: unknown) => void): void {
+    this.clients.set(clientId, { botId, send })
+    this.logger.log(`Browser client registered: ${clientId} botId=${botId} (total: ${this.clients.size})`)
   }
 
   unregisterClient(clientId: string): void {
@@ -27,19 +37,10 @@ export class BridleGateway extends IBridleGateway {
     this.logger.log(`Browser client unregistered: ${clientId} (total: ${this.clients.size})`)
   }
 
-  registerAgent(send: (data: unknown) => void): void {
-    this.agentSend = send
-    this.logger.log('Agent connected')
-  }
-
-  unregisterAgent(): void {
-    this.agentSend = null
-    this.logger.warn('Agent disconnected')
-  }
-
-  sendToAgent(clientId: string, text: string, images?: IBridleImageData[]): void {
-    if (!this.agentSend) {
-      this.logger.warn('Cannot send to agent — not connected')
+  sendToAgent(clientId: string, botId: string, text: string, images?: IBridleImageData[]): void {
+    const agentSend = this.agents.get(botId)
+    if (!agentSend) {
+      this.logger.warn(`Cannot send to agent — not connected (botId=${botId})`)
       this.sendToClient(clientId, {
         type: 'message',
         text: 'Agent is not connected. Please try again later.',
@@ -49,7 +50,7 @@ export class BridleGateway extends IBridleGateway {
       return
     }
 
-    this.agentSend({
+    agentSend({
       type: 'message',
       clientId,
       text,
@@ -59,27 +60,39 @@ export class BridleGateway extends IBridleGateway {
   }
 
   sendToClient(clientId: string, data: unknown): void {
-    const send = this.clients.get(clientId)
-    if (send) {
-      send(data)
+    const client = this.clients.get(clientId)
+    if (client) {
+      client.send(data)
     }
   }
 
-  handleAgentEvent(data: IBridleOutgoingEvent): void {
+  handleAgentEvent(botId: string, data: IBridleOutgoingEvent): void {
     const clientId = data.clientId
     if (!clientId) return
 
-    const send = this.clients.get(clientId)
-    if (send) {
-      send(data)
+    const client = this.clients.get(clientId)
+    if (client && client.botId === botId) {
+      client.send(data)
     }
   }
 
   health(): IBridleHealthData {
     return {
       ok: true,
-      agentConnected: this.agentSend !== null,
+      agentConnected: this.agents.size > 0,
       browserClients: this.clients.size,
+    }
+  }
+
+  botHealth(botId: string): IBridleHealthData {
+    let clientCount = 0
+    for (const client of this.clients.values()) {
+      if (client.botId === botId) clientCount++
+    }
+    return {
+      ok: true,
+      agentConnected: this.agents.has(botId),
+      browserClients: clientCount,
     }
   }
 }

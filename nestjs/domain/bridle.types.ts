@@ -7,6 +7,7 @@ export interface IBridleImageData {
 export interface IBridleIncomingMessage {
   type: 'message'
   clientId: string
+  botId: string
   text: string
   messageId: string
   images?: IBridleImageData[]
@@ -26,4 +27,18 @@ export interface IBridleHealthData {
   ok: boolean
   agentConnected: boolean
   browserClients: number
+}
+
+/** Per-bot health check response */
+export interface IBridleBotHealthData {
+  ok: boolean
+  agentConnected: boolean
+  browserClients: number
+  botId: string
+}
+
+/** Registered client metadata */
+export interface IBridleClientData {
+  botId: string
+  send: (data: unknown) => void
 }

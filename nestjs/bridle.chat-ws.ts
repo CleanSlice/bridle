@@ -8,13 +8,19 @@ import {
   ConnectedSocket,
 } from '@nestjs/websockets'
 import { Logger } from '@nestjs/common'
+import { JwtService } from '@nestjs/jwt'
 import { Server, Socket } from 'socket.io'
-import { randomUUID } from 'crypto'
 import { IBridleGateway } from './domain'
 
 /**
  * WebSocket gateway for BROWSER clients.
- * Browsers connect here: ws://api-host/ws/chat
+ * Browsers connect here: ws://hub-host/ws/chat
+ *
+ * Auth: JWT token + botId in Socket.IO handshake.
+ * Token is verified via JwtService. botId scopes the chat to a specific bot.
+ *
+ * Admin detection: if JWT payload contains roles including 'ADMIN',
+ * clientId is set to 'admin' so the runtime's access control recognizes it.
  *
  * Events (browser → hub):
  *   "message"  { text, images? }
@@ -35,28 +41,52 @@ export class ChatWsGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   private readonly logger = new Logger(ChatWsGateway.name)
 
-  constructor(private readonly hub: IBridleGateway) {}
+  constructor(
+    private readonly hub: IBridleGateway,
+    private readonly jwt: JwtService,
+  ) {}
 
   handleConnection(client: Socket) {
-    const clientId = randomUUID()
-    client.data = { clientId }
+    const token = client.handshake.auth?.token as string | undefined
+    const botId = client.handshake.auth?.botId as string | undefined
+
+    if (!token || !botId) {
+      this.logger.warn('Browser connection rejected: missing token or botId')
+      client.disconnect(true)
+      return
+    }
+
+    let payload: Record<string, unknown>
+    try {
+      payload = this.jwt.verify(token) as Record<string, unknown>
+    } catch {
+      this.logger.warn('Browser connection rejected: invalid JWT')
+      client.disconnect(true)
+      return
+    }
+
+    const roles = payload.roles as string[] | undefined
+    const isAdmin = Array.isArray(roles) && roles.includes('ADMIN')
+    const clientId = isAdmin ? 'admin' : (payload.sub as string)
+
+    client.data = { clientId, botId, email: payload.email, isAdmin }
 
     const send = (data: unknown) => {
       const event = (data as Record<string, unknown>)?.type as string ?? 'data'
       client.emit(event, data)
     }
 
-    this.hub.registerClient(clientId, send)
+    this.hub.registerClient(clientId, botId, send)
     client.emit('welcome', { clientId })
 
-    this.logger.log(`Browser client connected: ${clientId}`)
+    this.logger.log(`Browser connected: clientId=${clientId} botId=${botId} admin=${isAdmin}`)
   }
 
   handleDisconnect(client: Socket) {
-    const clientId = client.data?.clientId
+    const clientId = client.data?.clientId as string | undefined
     if (clientId) {
       this.hub.unregisterClient(clientId)
-      this.logger.log(`Browser client disconnected: ${clientId}`)
+      this.logger.log(`Browser disconnected: clientId=${clientId}`)
     }
   }
 
@@ -65,10 +95,11 @@ export class ChatWsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { text?: string; images?: Array<{ base64: string; mediaType: string }> },
   ) {
-    const clientId = client.data?.clientId
-    if (!clientId || !data?.text) return
+    const clientId = client.data?.clientId as string
+    const botId = client.data?.botId as string
+    if (!clientId || !botId || !data?.text) return
 
-    this.hub.sendToAgent(clientId, data.text, data.images)
+    this.hub.sendToAgent(clientId, botId, data.text, data.images)
   }
 
   @SubscribeMessage('ping')
