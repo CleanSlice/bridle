@@ -4,7 +4,11 @@ import type { BridlePart, IBridleMessage } from './types'
 export interface IBridleClientOptions {
   apiUrl: string
   botId: string
-  token: string | (() => string | Promise<string>)
+  /**
+   * JWT for authenticated bots. Omit when the bot is public on the hub —
+   * the connection is then authorized by the request `Origin` header.
+   */
+  token?: string | (() => string | Promise<string>)
   /** Optional channel for transcript scoping (default: 'web'). */
   channel?: string
 }
@@ -32,7 +36,9 @@ export class BridleClient {
   async connect(): Promise<void> {
     if (this.socket) return
     const token =
-      typeof this.opts.token === 'function' ? await this.opts.token() : this.opts.token
+      typeof this.opts.token === 'function'
+        ? await this.opts.token()
+        : (this.opts.token ?? '')
     const url = this.opts.apiUrl.replace(/\/$/, '')
 
     const socket = io(`${url}/ws/chat`, {

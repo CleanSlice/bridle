@@ -1,4 +1,4 @@
-# @cleanslice/bridle-sdk
+# @cleanslice/bridle
 
 Embeddable webchat for [Bridle](https://bridle.cleanslice.org). One Web Component, three integration paths: drop-in `<script>`, npm + bundler, or headless client.
 
@@ -20,7 +20,7 @@ The script auto-mounts a floating chat bubble in the bottom-right corner. If the
 | Attribute | Default | Description |
 |-----------|---------|-------------|
 | `data-bot-id` | required | Bot identifier registered on the hub |
-| `data-token` | required | JWT for browser auth |
+| `data-token` | optional | JWT for browser auth (omit for public bots) |
 | `data-api-url` | inferred | Hub origin |
 | `data-mode` | `floating` | `floating` (FAB) or `inline` (mounted inside `data-mount`) |
 | `data-mount` | `<body>` | CSS selector for inline mode |
@@ -30,7 +30,7 @@ The script auto-mounts a floating chat bubble in the bottom-right corner. If the
 ## Programmatic init
 
 ```js
-import { init } from '@cleanslice/bridle-sdk'
+import { init } from '@cleanslice/bridle'
 
 const chat = init({
   apiUrl: 'https://your-hub.example.com',
@@ -54,7 +54,7 @@ chat.destroy()
 ## Headless client (no UI)
 
 ```js
-import { BridleClient } from '@cleanslice/bridle-sdk'
+import { BridleClient } from '@cleanslice/bridle'
 
 const client = new BridleClient({
   apiUrl: 'https://your-hub.example.com',

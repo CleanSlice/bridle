@@ -54,7 +54,6 @@ function init(opts: IBridleInitOptions): IBridleInstance {
     throw new Error('[bridle] init() can only run in a browser')
   }
   if (!opts.botId) throw new Error('[bridle] botId is required')
-  if (!opts.token) throw new Error('[bridle] token is required')
 
   register()
 
@@ -80,11 +79,14 @@ function init(opts: IBridleInitOptions): IBridleInstance {
 
   // Resolve the token. Static strings are set immediately; functions are called
   // and the result is set when ready. The Vue prop-watcher inside the element
-  // triggers connect once token is non-empty.
+  // triggers connect once token is non-empty. If no token is provided (public
+  // bot), set an empty string so the watcher still fires.
   const setToken = (t: string): void => {
     el.setAttribute('token', t)
   }
-  if (typeof opts.token === 'function') {
+  if (opts.token === undefined) {
+    setToken('')
+  } else if (typeof opts.token === 'function') {
     Promise.resolve(opts.token())
       .then(setToken)
       .catch((err) => opts.onError?.(err instanceof Error ? err : new Error(String(err))))

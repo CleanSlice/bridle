@@ -5,17 +5,17 @@ When you control the build (Vite, Next, Nuxt, Webpack, Rollup), use the npm pack
 ## Install
 
 ```bash
-npm i @cleanslice/bridle-sdk
+npm i @cleanslice/bridle
 # or
-pnpm add @cleanslice/bridle-sdk
+pnpm add @cleanslice/bridle
 # or
-yarn add @cleanslice/bridle-sdk
+yarn add @cleanslice/bridle
 ```
 
 ## Usage
 
 ```ts
-import { init } from '@cleanslice/bridle-sdk'
+import { init } from '@cleanslice/bridle'
 
 const chat = init({
   apiUrl: 'https://your-hub.example.com',
@@ -83,7 +83,7 @@ The function is called on each connect (initial mount and after disconnects). If
 ```vue
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref } from 'vue'
-import { init, type IBridleInstance } from '@cleanslice/bridle-sdk'
+import { init, type IBridleInstance } from '@cleanslice/bridle'
 
 const root = ref<HTMLDivElement | null>(null)
 let chat: IBridleInstance | null = null
@@ -110,7 +110,7 @@ onBeforeUnmount(() => chat?.destroy())
 
 ```tsx
 import { useEffect, useRef } from 'react'
-import { init, type IBridleInstance } from '@cleanslice/bridle-sdk'
+import { init, type IBridleInstance } from '@cleanslice/bridle'
 
 export function Chat() {
   const ref = useRef<HTMLDivElement>(null)
@@ -157,5 +157,5 @@ import type {
   IBridleMessage,
   IBridleInitOptions,
   IBridleInstance,
-} from '@cleanslice/bridle-sdk'
+} from '@cleanslice/bridle'
 ```

@@ -5,9 +5,6 @@ hero:
   name: Bridle
   text: Embed AI chat in any site.
   tagline: One script tag connects your visitors to a streaming AI agent through a stateless WebSocket relay.
-  image:
-    src: /logo.svg
-    alt: Bridle
   actions:
     - theme: brand
       text: Quick Start

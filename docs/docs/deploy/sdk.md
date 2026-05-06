@@ -25,14 +25,14 @@ This is the path embedders use by default. **No setup on your side.**
 
 ## Option 2 — npm + jsDelivr / unpkg
 
-`@cleanslice/bridle-sdk` is published to npm. Public CDNs mirror npm automatically:
+`@cleanslice/bridle` is published to npm. Public CDNs mirror npm automatically:
 
 ```html
 <!-- jsDelivr -->
-<script src="https://cdn.jsdelivr.net/npm/@cleanslice/bridle-sdk@1/dist/bridle.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@cleanslice/bridle@1/dist/bridle.js"></script>
 
 <!-- unpkg -->
-<script src="https://unpkg.com/@cleanslice/bridle-sdk@1/dist/bridle.js"></script>
+<script src="https://unpkg.com/@cleanslice/bridle@1/dist/bridle.js"></script>
 ```
 
 Use the `@1` tag to pin to the major version. Use `@latest` for the bleeding edge. Use `@1.0.0` for an exact pin.

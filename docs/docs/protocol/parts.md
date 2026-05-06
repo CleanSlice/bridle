@@ -71,7 +71,7 @@ The `text` field is the plain-text rollup of all `text`-typed parts, used for tr
 The SDK ships a helper:
 
 ```ts
-import { buildParts } from '@cleanslice/bridle-sdk' // (planned export)
+import { buildParts } from '@cleanslice/bridle' // (planned export)
 
 buildParts('Here is the image', [
   { base64: '...', mediaType: 'image/jpeg' },

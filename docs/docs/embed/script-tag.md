@@ -39,7 +39,7 @@ Three options, pick what fits your CSP and ops:
 <script src="https://your-hub.example.com/sdk/latest.js" ...></script>
 
 <!-- C. Public CDN mirror (jsDelivr / unpkg via npm) -->
-<script src="https://cdn.jsdelivr.net/npm/@cleanslice/bridle-sdk@latest" ...></script>
+<script src="https://cdn.jsdelivr.net/npm/@cleanslice/bridle@latest" ...></script>
 ```
 
 When the SDK is loaded **from the same origin as your hub** (option B), `data-api-url` can be omitted — the SDK infers it from `document.currentScript.src`.

@@ -38,7 +38,7 @@ export default defineConfig({
       {
         text: 'Resources',
         items: [
-          { text: 'SDK on npm', link: 'https://www.npmjs.com/package/@cleanslice/bridle-sdk' },
+          { text: 'SDK on npm', link: 'https://www.npmjs.com/package/@cleanslice/bridle' },
           { text: 'GitHub', link: 'https://github.com/CleanSlice/bridle' },
           { text: 'CleanSlice', link: 'https://cleanslice.org' },
         ],

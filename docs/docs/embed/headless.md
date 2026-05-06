@@ -5,13 +5,13 @@ When you don't want the built-in widget UI and would rather render your own. The
 ## Install
 
 ```bash
-npm i @cleanslice/bridle-sdk
+npm i @cleanslice/bridle
 ```
 
 ## Usage
 
 ```ts
-import { BridleClient } from '@cleanslice/bridle-sdk'
+import { BridleClient } from '@cleanslice/bridle'
 
 const client = new BridleClient({
   apiUrl: 'https://your-hub.example.com',

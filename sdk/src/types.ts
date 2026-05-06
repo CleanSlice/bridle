@@ -28,8 +28,10 @@ export interface IBridleInitOptions {
   /**
    * JWT used to authenticate the browser to the hub. Pass a string for static
    * tokens, or a function returning a string/Promise<string> for refresh.
+   * Omit when the bot is configured as public on the hub — the hub will
+   * accept the connection based on the request `Origin` header.
    */
-  token: string | (() => string | Promise<string>)
+  token?: string | (() => string | Promise<string>)
   /**
    * Where to mount the chat element. Defaults to <body>.
    * Accepts a CSS selector string or an HTMLElement.

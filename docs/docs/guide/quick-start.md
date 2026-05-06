@@ -79,11 +79,11 @@ When you need to fetch the token from the client (SPA, dynamic auth):
 ## With a bundler (Vite, Next, Webpack)
 
 ```bash
-npm i @cleanslice/bridle-sdk
+npm i @cleanslice/bridle
 ```
 
 ```ts
-import { init } from '@cleanslice/bridle-sdk'
+import { init } from '@cleanslice/bridle'
 
 init({
   apiUrl: import.meta.env.VITE_BRIDLE_URL,
@@ -98,7 +98,7 @@ init({
 If you don't want the built-in widget, use the `BridleClient` directly:
 
 ```ts
-import { BridleClient } from '@cleanslice/bridle-sdk'
+import { BridleClient } from '@cleanslice/bridle'
 
 const client = new BridleClient({ apiUrl, botId, token })
 

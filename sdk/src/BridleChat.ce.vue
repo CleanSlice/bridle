@@ -140,17 +140,18 @@ watch(
 )
 
 // Reconnect when bot/token/api changes — useful for dynamic dashboards.
+// Token may be empty for public bots (auth via Origin whitelist).
 watch(
   () => [props.apiUrl, props.botId, props.token],
   () => {
-    if (!props.apiUrl || !props.botId || !props.token) return
+    if (!props.apiUrl || !props.botId) return
     messages.value = []
     void connect()
   },
 )
 
 onMounted(async () => {
-  if (!props.apiUrl || !props.botId || !props.token) return
+  if (!props.apiUrl || !props.botId) return
   await connect()
 })
 

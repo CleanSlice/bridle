@@ -16,7 +16,7 @@ Browser (any site)           Bridle Hub (NestJS)           Agent Runtime
 
 | Package | What it is | Stack |
 |---------|------------|-------|
-| `@cleanslice/bridle-sdk` | Embeddable Web Component for any site | Vue 3 (compiled), socket.io-client |
+| `@cleanslice/bridle` | Embeddable Web Component for any site | Vue 3 (compiled), socket.io-client |
 | `bridle/nestjs/` | Hub server — WebSocket relay + HTTP fallback | NestJS, Socket.IO, JWT |
 | `bridle/runtime/` | Agent client library | socket.io-client |
 | `bridle/nuxt/` | Nuxt layer — same UI as the SDK, but as a layer | Nuxt 3, Vue 3, shadcn-vue |
@@ -48,4 +48,4 @@ This site (`bridle.cleanslice.org`) hosts:
 - Documentation for embedding, deploying, and operating Bridle.
 - The SDK CDN at [`/sdk/latest.js`](https://bridle.cleanslice.org/sdk/latest.js), [`/sdk/v1.js`](https://bridle.cleanslice.org/sdk/v1.js), and pinned versions.
 
-You can pull the SDK from this site, from [unpkg](https://unpkg.com/@cleanslice/bridle-sdk), from [jsDelivr](https://cdn.jsdelivr.net/npm/@cleanslice/bridle-sdk), or self-host the bundle from your own hub. Pick whichever your CSP / latency / branding requirements prefer.
+You can pull the SDK from this site, from [unpkg](https://unpkg.com/@cleanslice/bridle), from [jsDelivr](https://cdn.jsdelivr.net/npm/@cleanslice/bridle), or self-host the bundle from your own hub. Pick whichever your CSP / latency / branding requirements prefer.
