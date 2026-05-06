@@ -2,5 +2,16 @@
   "name": "bridle",
   "version": "0.1.0",
   "private": true,
-  "description": "AI chat relay — Hub + Chat UI"
+  "description": "AI chat relay — Hub + Embed SDK + Docs",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "heroku-postbuild": "cd sdk && npm ci && npm run build && cd ../docs && npm ci && npm run build",
+    "build": "cd sdk && npm ci && npm run build && cd ../docs && npm ci && npm run build",
+    "start": "serve -s docs/docs/.vitepress/dist -l tcp://0.0.0.0:${PORT:-8080}"
+  },
+  "dependencies": {
+    "serve": "^14.2.4"
+  }
 }
