@@ -22,6 +22,9 @@
   },
   "files": ["dist", "README.md"],
   "sideEffects": ["./dist/bridle.js"],
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "vite build --watch",
     "build": "vite build && tsc -p tsconfig.dts.json",
