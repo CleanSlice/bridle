@@ -1,0 +1,62 @@
+# DigitalOcean App Platform — bridle.cleanslice.org
+#
+# Deploys the docs site (VitePress) as a Static Site, with the SDK bundle
+# built and copied into docs/public/sdk/ during the build.
+#
+# Apply with:
+#   doctl apps create --spec bridle/.do/app.yaml
+# Update with:
+#   doctl apps update <APP_ID> --spec bridle/.do/app.yaml
+#
+# DNS (set in Cloudflare or your DNS provider for cleanslice.org):
+#   bridle  CNAME  <app-name>.ondigitalocean.app
+#
+# DigitalOcean handles the TLS cert via Let's Encrypt automatically.
+
+name: bridle-docs
+region: fra1
+
+# Build the static site. The build runs at the repo root, so paths are
+# `bridle/sdk` and `bridle/docs`. If you deploy this repo with `bridle` as
+# the root, drop the leading `bridle/` from `source_dir` below.
+static_sites:
+  - name: docs
+    source_dir: /
+    github:
+      repo: CleanSlice/bridle
+      branch: main
+      deploy_on_push: true
+
+    # Build the SDK first, then the VitePress site (which runs copy-sdk.mjs).
+    build_command: |
+      set -e
+      cd sdk && npm ci && npm run build
+      cd ../docs && npm ci && npm run build
+
+    # VitePress build output.
+    output_dir: docs/docs/.vitepress/dist
+
+    index_document: index.html
+    error_document: 404.html
+
+    # Custom headers — set long cache for pinned SDK versions, short for the
+    # always-current aliases. The HTML pages themselves use short caches so
+    # docs updates land instantly.
+    routes:
+      - path: /
+    cors:
+      allow_origins:
+        - prefix: https://
+      allow_methods:
+        - GET
+        - HEAD
+        - OPTIONS
+
+    envs:
+      - key: NODE_VERSION
+        value: '20'
+
+domains:
+  - domain: bridle.cleanslice.org
+    type: PRIMARY
+    zone: cleanslice.org

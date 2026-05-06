@@ -1,0 +1,17 @@
+{
+  "name": "bridle-docs",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vitepress dev docs",
+    "build": "node scripts/copy-sdk.mjs && vitepress build docs",
+    "build:sdk": "cd ../sdk && npm install --no-audit --no-fund && npm run build",
+    "build:all": "npm run build:sdk && npm run build",
+    "preview": "vitepress preview docs --port ${PORT:-4173}",
+    "start": "vitepress preview docs --port ${PORT:-4173} --host 0.0.0.0"
+  },
+  "dependencies": {
+    "vitepress": "^1.6.4"
+  }
+}

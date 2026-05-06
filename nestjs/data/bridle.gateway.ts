@@ -1,7 +1,24 @@
 import { Injectable, Logger } from '@nestjs/common'
-import { IBridleGateway } from '../domain/bridle.gateway'
-import type { IBridleHealthData, IBridleBotHealthData, IBridleOutgoingEvent, IBridleClientData, BridlePart } from '../domain/bridle.types'
+import { IBridleGateway, type IBridleSyncAgentResult } from '../domain/bridle.gateway'
+import type {
+  IBridleHealthData,
+  IBridleBotHealthData,
+  IBridleOutgoingEvent,
+  IBridleDebugEvent,
+  IBridleSyncResponse,
+  IBridleClientData,
+  BridlePart,
+} from '../domain/bridle.types'
 import { randomUUID } from 'crypto'
+
+interface IPendingSync {
+  resolve: (value: IBridleSyncAgentResult) => void
+  reject: (reason: Error) => void
+  timer: NodeJS.Timeout
+  botId: string
+}
+
+const DEFAULT_SYNC_TIMEOUT_MS = 15_000
 
 /**
  * Hub implementation — manages per-bot agent connections and per-bot browser
@@ -14,8 +31,11 @@ export class BridleGateway extends IBridleGateway {
   /** Agent connections: botId → send function */
   private agents = new Map<string, (data: unknown) => void>()
 
-  /** Browser clients: clientId → { botId, send } */
+  /** Browser clients: clientId → { botId, send, isAdmin } */
   private clients = new Map<string, IBridleClientData>()
+
+  /** Pending sync requests awaiting agent ack: requestId → pending */
+  private pendingSyncs = new Map<string, IPendingSync>()
 
   registerAgent(botId: string, send: (data: unknown) => void): void {
     this.agents.set(botId, send)
@@ -25,11 +45,25 @@ export class BridleGateway extends IBridleGateway {
   unregisterAgent(botId: string): void {
     this.agents.delete(botId)
     this.logger.warn(`Agent unregistered: botId=${botId} (total agents: ${this.agents.size})`)
+    // Cancel any pending sync requests for this bot — agent dropped before acking
+    for (const [requestId, pending] of this.pendingSyncs) {
+      if (pending.botId !== botId) continue
+      clearTimeout(pending.timer)
+      this.pendingSyncs.delete(requestId)
+      pending.reject(new Error('Agent disconnected before sync completed'))
+    }
   }
 
-  registerClient(clientId: string, botId: string, send: (data: unknown) => void): void {
-    this.clients.set(clientId, { botId, send })
-    this.logger.log(`Browser client registered: ${clientId} botId=${botId} (total: ${this.clients.size})`)
+  registerClient(
+    clientId: string,
+    botId: string,
+    send: (data: unknown) => void,
+    isAdmin: boolean,
+  ): void {
+    this.clients.set(clientId, { botId, send, isAdmin })
+    this.logger.log(
+      `Browser client registered: ${clientId} botId=${botId} admin=${isAdmin} (total: ${this.clients.size})`,
+    )
   }
 
   unregisterClient(clientId: string): void {
@@ -77,6 +111,70 @@ export class BridleGateway extends IBridleGateway {
     }
   }
 
+  setDebug(botId: string, enabled: boolean): void {
+    const agentSend = this.agents.get(botId)
+    if (!agentSend) {
+      this.logger.debug(`setDebug skipped: agent not connected for botId=${botId}`)
+      return
+    }
+    agentSend({ type: 'debug_set', enabled })
+    this.logger.log(`Pushed debug_set=${enabled} to agent botId=${botId}`)
+  }
+
+  handleDebugEvent(botId: string, data: IBridleDebugEvent): void {
+    // Admin-only fan-out. We ignore data.clientId on purpose: the runtime
+    // only knows the immediate sender, but multiple admins may be observing
+    // the same bot and they all want to see prompt traces.
+    let delivered = 0
+    for (const client of this.clients.values()) {
+      if (client.botId !== botId) continue
+      if (!client.isAdmin) continue
+      client.send(data)
+      delivered++
+    }
+    if (delivered === 0) {
+      this.logger.debug(`Debug event dropped: no admin clients for botId=${botId}`)
+    }
+  }
+
+  syncAgent(
+    botId: string,
+    timeoutMs: number = DEFAULT_SYNC_TIMEOUT_MS,
+  ): Promise<IBridleSyncAgentResult> {
+    const agentSend = this.agents.get(botId)
+    if (!agentSend) {
+      return Promise.resolve({ agentOnline: false, pushed: 0 })
+    }
+
+    const requestId = randomUUID()
+    return new Promise<IBridleSyncAgentResult>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingSyncs.delete(requestId)
+        reject(new Error(`Sync timed out after ${timeoutMs}ms (botId=${botId})`))
+      }, timeoutMs)
+
+      this.pendingSyncs.set(requestId, { resolve, reject, timer, botId })
+      agentSend({ type: 'sync', requestId })
+    })
+  }
+
+  handleSyncResponse(botId: string, data: IBridleSyncResponse): void {
+    const pending = this.pendingSyncs.get(data.requestId)
+    if (!pending) {
+      this.logger.warn(
+        `Got sync_done for unknown requestId=${data.requestId} botId=${botId}`,
+      )
+      return
+    }
+    clearTimeout(pending.timer)
+    this.pendingSyncs.delete(data.requestId)
+    if (data.error) {
+      pending.reject(new Error(data.error))
+    } else {
+      pending.resolve({ agentOnline: true, pushed: data.pushed ?? 0 })
+    }
+  }
+
   health(): IBridleHealthData {
     return {
       ok: true,
@@ -96,5 +194,17 @@ export class BridleGateway extends IBridleGateway {
       browserClients: clientCount,
       botId,
     }
+  }
+
+  listAgents(): Array<{ botId: string; clients: number }> {
+    const result: Array<{ botId: string; clients: number }> = []
+    for (const botId of this.agents.keys()) {
+      let clients = 0
+      for (const c of this.clients.values()) {
+        if (c.botId === botId) clients++
+      }
+      result.push({ botId, clients })
+    }
+    return result
   }
 }

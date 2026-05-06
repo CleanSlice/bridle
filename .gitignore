@@ -1,0 +1,23 @@
+# Dependencies
+**/node_modules
+
+# Build outputs
+nestjs/dist
+sdk/dist
+docs/docs/.vitepress/dist
+docs/docs/.vitepress/cache
+docs/docs/public/sdk/
+
+# Nuxt
+nuxt/.nuxt
+nuxt/.output
+
+# Lockfiles — bun.lock excluded (you can switch this off if you want
+# reproducible installs; for now we keep the existing convention).
+**/bun.lock
+
+# Env / OS
+.env
+!.env.example
+.DS_Store
+*.log

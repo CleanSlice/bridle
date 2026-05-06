@@ -9,7 +9,12 @@ import {
 import { Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { Socket } from 'socket.io'
-import { IBridleGateway, type IBridleOutgoingEvent } from '../domain'
+import {
+  IBridleGateway,
+  type IBridleOutgoingEvent,
+  type IBridleDebugEvent,
+  type IBridleSyncResponse,
+} from '../domain'
 
 /**
  * WebSocket gateway for AGENT runtime connections.
@@ -26,13 +31,17 @@ import { IBridleGateway, type IBridleOutgoingEvent } from '../domain'
  *   "stream"      { clientId, text, messageId, ts }
  *   "stream_end"  { clientId, text, messageId, ts }
  *   "typing"      { clientId, ts }
+ *   "debug"       { clientId, messageId?, model, provider, systemPrompt, ... } admin-only
+ *   "sync_done"   { requestId, pushed, error? }
  *   "ping"        {}
  *
  * Events (Hub → Agent):
  *   "message"     { clientId, text, messageId, images? }
+ *   "debug_set"   { enabled }
+ *   "sync"        { requestId }
  *   "pong"        {}
  */
-@WebSocketGateway({ namespace: '/ws/agent', cors: { origin: '*' } })
+@WebSocketGateway({ namespace: '/ws/agent' })
 export class BridleAgentWsHandler implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly logger = new Logger(BridleAgentWsHandler.name)
 
@@ -100,6 +109,28 @@ export class BridleAgentWsHandler implements OnGatewayConnection, OnGatewayDisco
     const botId = client.data?.botId as string
     if (data?.clientId && botId) {
       this.hub.handleAgentEvent(botId, { ...data, type: 'typing' })
+    }
+  }
+
+  @SubscribeMessage('debug')
+  handleDebug(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: IBridleDebugEvent,
+  ) {
+    const botId = client.data?.botId as string
+    if (botId) {
+      this.hub.handleDebugEvent(botId, { ...data, type: 'debug' })
+    }
+  }
+
+  @SubscribeMessage('sync_done')
+  handleSyncDone(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: IBridleSyncResponse,
+  ) {
+    const botId = client.data?.botId as string
+    if (botId && data?.requestId) {
+      this.hub.handleSyncResponse(botId, data)
     }
   }
 

@@ -2,9 +2,11 @@
 
 # Bridle
 
-Webchat relay for AI agents. Bridle connects browser users to an agent runtime through a stateless NestJS hub, with a ready-made Nuxt chat UI and an agent-side Socket.IO client.
+Webchat relay for AI agents. Bridle connects browser users to an agent runtime through a stateless NestJS hub, with a ready-made Nuxt chat UI, an embeddable JS SDK for any site, and an agent-side Socket.IO client.
 
-[Protocol Specification](./docs/PROTOCOL.md) | [Hub Server (NestJS)](./nestjs/README.md) | [Chat UI (Nuxt)](./nuxt/README.md) | [Agent Client (Runtime)](./runtime/README.md)
+**[📚 Full documentation: bridle.cleanslice.org](https://bridle.cleanslice.org)**
+
+[Protocol Spec](./docs/PROTOCOL.md) · [Hub (NestJS)](./nestjs/README.md) · [Nuxt Layer](./nuxt/README.md) · [Embed SDK](./sdk/README.md) · [Agent Runtime](./runtime/README.md)
 
 ```
 Browser (Nuxt)               Bridle Hub (NestJS)           Agent Runtime
@@ -60,9 +62,24 @@ Read the bridle README.md and docs/PROTOCOL.md for full auth details, parts form
 
 | Directory | Description | Stack |
 |-----------|-------------|-------|
-| `nestjs/` | Hub server -- WebSocket relay + HTTP fallback | NestJS, Socket.IO, JWT |
-| `nuxt/` | Chat UI -- drop-in component + Pinia store | Nuxt 3, Vue 3, shadcn-vue |
-| `runtime/` | Agent client -- connects to the hub as a channel | Socket.IO client |
+| `nestjs/` | Hub server — WebSocket relay + HTTP fallback | NestJS, Socket.IO, JWT |
+| `nuxt/` | Nuxt layer — chat UI for internal Nuxt apps | Nuxt 3, Vue 3, shadcn-vue |
+| `sdk/` | Embed SDK — Web Component for any website | Vue 3 (compiled), socket.io-client |
+| `runtime/` | Agent client — connects to the hub as a channel | socket.io-client |
+| `docs/` | Documentation site (VitePress) — published at [bridle.cleanslice.org](https://bridle.cleanslice.org) | VitePress |
+
+## Embed in any site (drop-in)
+
+```html
+<script
+  src="https://bridle.cleanslice.org/sdk/latest.js"
+  data-api-url="https://your-hub.example.com"
+  data-bot-id="bot-abc-123"
+  data-token="<jwt>"
+></script>
+```
+
+Full embed guide: [bridle.cleanslice.org/embed/script-tag](https://bridle.cleanslice.org/embed/script-tag).
 
 ## Message Parts
 

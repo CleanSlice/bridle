@@ -1,0 +1,68 @@
+// Wire-format types that match bridle/nestjs/domain/bridle.types.ts.
+// Kept in sync manually — the hub is the source of truth.
+
+export type BridlePart =
+  | { type: 'text'; text: string }
+  | { type: 'image'; base64: string; mediaType: string }
+  | { type: 'file'; url: string; name: string; mimeType?: string }
+
+export interface IBridleMessage {
+  id: string
+  role: 'user' | 'assistant'
+  text: string
+  parts: BridlePart[]
+  ts: number
+  /** True between `stream` and `stream_end` events. */
+  streaming?: boolean
+}
+
+export interface IBridleInitOptions {
+  /**
+   * Hub origin, e.g. `https://hub.example.com`. If omitted, the SDK infers it
+   * from the origin of the loading <script> tag — only works when the SDK is
+   * served from the same origin as the hub.
+   */
+  apiUrl?: string
+  /** Bot identifier registered on the hub (`BRIDLE_BOT_ID` on the agent). */
+  botId: string
+  /**
+   * JWT used to authenticate the browser to the hub. Pass a string for static
+   * tokens, or a function returning a string/Promise<string> for refresh.
+   */
+  token: string | (() => string | Promise<string>)
+  /**
+   * Where to mount the chat element. Defaults to <body>.
+   * Accepts a CSS selector string or an HTMLElement.
+   */
+  mount?: string | HTMLElement
+  /**
+   * Floating bubble in the corner (default) or inline inside `mount`.
+   */
+  mode?: 'floating' | 'inline'
+  /** Header text. Default: "Agent Chat". */
+  title?: string
+  /** Input placeholder. Default: "Type a message...". */
+  placeholder?: string
+  /**
+   * Theme overrides — any of the documented CSS custom properties.
+   * Example: `{ '--bridle-primary': '#0070f3' }`.
+   */
+  theme?: Record<string, string>
+  /** Hooks for headless side effects in addition to the UI. */
+  onReady?: () => void
+  onMessage?: (message: IBridleMessage) => void
+  onError?: (error: Error) => void
+}
+
+export interface IBridleInstance {
+  /** Underlying custom element. Useful for further DOM manipulation. */
+  element: HTMLElement
+  /** Open the panel (floating mode). */
+  open: () => void
+  /** Close the panel (floating mode). */
+  close: () => void
+  /** Programmatically send a user message. */
+  sendMessage: (text: string) => void
+  /** Tear down the widget and disconnect. */
+  destroy: () => void
+}

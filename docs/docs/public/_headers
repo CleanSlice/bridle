@@ -1,0 +1,35 @@
+# Cache headers for the SDK CDN.
+# DO App Platform Static Sites copies this file into the deployed root and
+# applies the rules to outgoing responses (Netlify-style _headers format).
+
+# Pinned exact versions — safe to cache forever.
+/sdk/v*.*.*.js
+  Cache-Control: public, max-age=31536000, immutable
+  Access-Control-Allow-Origin: *
+
+/sdk/v*.*.*.mjs
+  Cache-Control: public, max-age=31536000, immutable
+  Access-Control-Allow-Origin: *
+
+# Major-version aliases — short cache so patches roll out fast.
+/sdk/v*.js
+  Cache-Control: public, max-age=300, must-revalidate
+  Access-Control-Allow-Origin: *
+
+/sdk/v*.mjs
+  Cache-Control: public, max-age=300, must-revalidate
+  Access-Control-Allow-Origin: *
+
+# `latest` — never cache hard.
+/sdk/latest.js
+  Cache-Control: public, max-age=60, must-revalidate
+  Access-Control-Allow-Origin: *
+
+/sdk/latest.mjs
+  Cache-Control: public, max-age=60, must-revalidate
+  Access-Control-Allow-Origin: *
+
+# Source maps for the SDK.
+/sdk/*.map
+  Cache-Control: public, max-age=300
+  Access-Control-Allow-Origin: *

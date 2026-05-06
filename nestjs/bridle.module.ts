@@ -1,10 +1,10 @@
 import { Module } from '@nestjs/common'
-import { ConfigModule } from '@nestjs/config'
+import { ConfigModule, ConfigService } from '@nestjs/config'
 import { JwtModule } from '@nestjs/jwt'
 import { BridleController } from './bridle.controller'
 import { BridleChatWsHandler, BridleAgentWsHandler } from './handlers'
-import { IBridleGateway } from './domain'
-import { BridleGateway } from './data'
+import { IBridleGateway, IBridleTranscriptGateway } from './domain'
+import { BridleGateway, BridleTranscriptNoopGateway } from './data'
 
 /**
  * Bridle Module — authenticated hub between browsers and bot agents.
@@ -33,22 +33,35 @@ import { BridleGateway } from './data'
  *   /ws/chat   — browser client connection (JWT + botId)
  *
  * HTTP endpoints:
- *   POST /api/agent/:botId/message       — fire & forget
- *   POST /api/agent/:botId/message/sync  — synchronous (120s timeout)
- *   GET  /api/agent/health               — overall hub status
- *   GET  /api/agent/:botId/health        — per-bot status
+ *   POST   /api/agent/:botId/message       — fire & forget
+ *   POST   /api/agent/:botId/message/sync  — synchronous (120s timeout)
+ *   GET    /api/agent/health               — overall hub status
+ *   GET    /api/agent/:botId/health        — per-bot status
+ *   GET    /api/agent/:botId/transcript    — replay persisted chat history
+ *   DELETE /api/agent/:botId/transcript    — clear chat history ("new chat")
+ *
+ * Transcript persistence is consumer-owned. By default `IBridleTranscriptGateway`
+ * is bound to a no-op stub; override in your AppModule providers to enable it.
  */
 @Module({
   imports: [
     ConfigModule,
-    JwtModule.register({}),
+    JwtModule.registerAsync({
+      imports: [ConfigModule],
+      useFactory: (config: ConfigService) => ({
+        secret: config.get('JWT_SECRET', 'bridle-dev-secret'),
+        signOptions: { expiresIn: '24h' },
+      }),
+      inject: [ConfigService],
+    }),
   ],
   providers: [
     { provide: IBridleGateway, useClass: BridleGateway },
+    { provide: IBridleTranscriptGateway, useClass: BridleTranscriptNoopGateway },
     BridleChatWsHandler,
     BridleAgentWsHandler,
   ],
   controllers: [BridleController],
-  exports: [IBridleGateway],
+  exports: [IBridleGateway, IBridleTranscriptGateway],
 })
 export class BridleModule {}

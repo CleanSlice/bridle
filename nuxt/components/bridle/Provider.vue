@@ -6,7 +6,8 @@ import Message from './Message.vue'
 import Input from './Input.vue'
 import { Card, CardContent, CardFooter, CardHeader } from '#theme/components/ui/card'
 import { ScrollArea } from '#theme/components/ui/scroll-area'
-import { Bot, Circle } from 'lucide-vue-next'
+import { Button } from '#theme/components/ui/button'
+import { Bot, Circle, MessageSquarePlus } from 'lucide-vue-next'
 import { cn } from '#theme/utils/cn'
 
 const props = withDefaults(defineProps<{
@@ -17,10 +18,17 @@ const props = withDefaults(defineProps<{
   placeholder?: string
   class?: HTMLAttributes['class']
   showStatus?: boolean
+  channel?: string
+  showNewChatButton?: boolean
+  resetConfirmText?: string
 }>(), {
   title: 'Agent Chat',
   placeholder: 'Type a message...',
   showStatus: true,
+  channel: 'admin',
+  showNewChatButton: true,
+  resetConfirmText:
+    'Delete the saved transcript and start fresh? Past messages will be removed from storage. The agent\'s in-memory context may persist until its next restart.',
 })
 
 const store = useBridleStore()
@@ -34,7 +42,13 @@ watch([messages, isTyping], async () => {
   if (el) el.scrollTop = el.scrollHeight
 }, { deep: true })
 
-onMounted(() => {
+onMounted(async () => {
+  // Replay persisted history first so the chat isn't blank between
+  // page refreshes / agent switches; then connect the WS for live updates.
+  // Clear before load so the previous bot's messages don't briefly leak
+  // through (the store is a shared singleton across providers).
+  store.clearMessages()
+  await store.loadTranscript(props.apiUrl, props.botId, props.token, props.channel)
   store.connect(props.apiUrl, props.botId, props.token)
 })
 
@@ -45,6 +59,24 @@ onUnmounted(() => {
 const handleSend = (text: string) => {
   store.sendMessage(text)
 }
+
+const resetting = ref(false)
+
+async function onNewChat() {
+  if (resetting.value) return
+  // Native confirm — bridle is a library, we don't ship a confirm-dialog
+  // component. Consumers that want a styled dialog can either fork this
+  // template or wrap the store's resetTranscript() with their own UI.
+  if (!window.confirm(props.resetConfirmText)) return
+  resetting.value = true
+  try {
+    store.disconnect()
+    await store.resetTranscript(props.apiUrl, props.botId, props.token, props.channel)
+    store.connect(props.apiUrl, props.botId, props.token)
+  } finally {
+    resetting.value = false
+  }
+}
 </script>
 
 <template>
@@ -54,11 +86,25 @@ const handleSend = (text: string) => {
         <Bot class="h-5 w-5" />
         <h3 class="font-semibold text-sm">{{ title }}</h3>
       </div>
-      <div v-if="showStatus" class="flex items-center gap-1.5 text-xs text-muted-foreground">
-        <Circle
-          :class="cn('h-2 w-2 fill-current', isConnected ? 'text-green-500' : 'text-red-500')"
-        />
-        {{ isConnected ? 'Connected' : 'Disconnected' }}
+      <div class="flex items-center gap-3">
+        <Button
+          v-if="showNewChatButton"
+          variant="ghost"
+          size="sm"
+          class="h-7 px-2 text-xs"
+          :disabled="resetting || messages.length === 0"
+          :title="messages.length === 0 ? 'Already empty' : 'Start a new chat'"
+          @click="onNewChat"
+        >
+          <MessageSquarePlus class="h-3.5 w-3.5" />
+          New chat
+        </Button>
+        <div v-if="showStatus" class="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Circle
+            :class="cn('h-2 w-2 fill-current', isConnected ? 'text-green-500' : 'text-red-500')"
+          />
+          {{ isConnected ? 'Connected' : 'Disconnected' }}
+        </div>
       </div>
     </CardHeader>
 

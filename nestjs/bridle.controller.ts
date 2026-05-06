@@ -1,13 +1,18 @@
-import { Controller, Post, Get, Body, HttpCode, Param, Req } from '@nestjs/common'
-import { ApiTags, ApiOperation, ApiBody, ApiOkResponse } from '@nestjs/swagger'
-import { IBridleGateway, buildParts } from './domain'
-import { SendMessageDto, BridleHealthDto, BridleBotHealthDto } from './dtos'
-import { FlatResponse } from '#core'
+import { Controller, Post, Get, Delete, Body, HttpCode, Param, Query, Req, Logger } from '@nestjs/common'
+import { ApiTags, ApiOperation, ApiBody, ApiOkResponse, ApiQuery } from '@nestjs/swagger'
+import { IBridleGateway, IBridleTranscriptGateway, buildParts } from './domain'
+import { SendMessageDto, BridleHealthDto, BridleBotHealthDto, TranscriptResponseDto } from './dtos'
+import { FlatResponse } from './core'
 
 @ApiTags('bridle')
 @Controller('api/agent')
 export class BridleController {
-  constructor(private readonly hub: IBridleGateway) {}
+  private readonly logger = new Logger(BridleController.name)
+
+  constructor(
+    private readonly hub: IBridleGateway,
+    private readonly transcripts: IBridleTranscriptGateway,
+  ) {}
 
   @ApiOperation({ description: 'Send a message to a bot agent (HTTP fallback — fire & forget)', operationId: 'sendBridleMessage' })
   @ApiBody({ type: SendMessageDto })
@@ -45,16 +50,21 @@ export class BridleController {
         resolve({ text: chunks.join('') || 'Timeout: no response from agent', messageId: '', ts: Date.now() })
       }, 120_000)
 
-      this.hub.registerClient(clientId, botId, (data: unknown) => {
-        const event = data as Record<string, unknown>
-        if (event.type === 'message' || event.type === 'stream_end') {
-          clearTimeout(timeout)
-          this.hub.unregisterClient(clientId)
-          resolve({ text: event.text ?? chunks.join(''), messageId: event.messageId, ts: event.ts })
-        } else if (event.type === 'stream') {
-          chunks.push((event.text as string) ?? '')
-        }
-      })
+      this.hub.registerClient(
+        clientId,
+        botId,
+        (data: unknown) => {
+          const event = data as Record<string, unknown>
+          if (event.type === 'message' || event.type === 'stream_end') {
+            clearTimeout(timeout)
+            this.hub.unregisterClient(clientId)
+            resolve({ text: event.text ?? chunks.join(''), messageId: event.messageId, ts: event.ts })
+          } else if (event.type === 'stream') {
+            chunks.push((event.text as string) ?? '')
+          }
+        },
+        false,
+      )
 
       const parts = body.parts ?? buildParts(body.text, body.images)
       this.hub.sendToAgent(clientId, botId, body.text, parts)
@@ -75,5 +85,56 @@ export class BridleController {
   @Get(':botId/health')
   async botHealth(@Param('botId') botId: string) {
     return this.hub.botHealth(botId)
+  }
+
+  @ApiOperation({ description: 'List all connected agents', operationId: 'listAgents' })
+  @FlatResponse()
+  @Get('list')
+  async listAgents() {
+    return this.hub.listAgents()
+  }
+
+  @ApiOperation({
+    description:
+      'Replay the persisted chat transcript for a bot. Used to restore the chat UI on page refresh — live updates still arrive via /ws/chat. Returns an empty array when nothing has been persisted yet.',
+    operationId: 'getBridleTranscript',
+  })
+  @ApiQuery({ name: 'channel', required: false, description: 'Session channel — defaults to "admin".' })
+  @FlatResponse()
+  @ApiOkResponse({ type: TranscriptResponseDto })
+  @Get(':botId/transcript')
+  async transcript(
+    @Param('botId') botId: string,
+    @Query('channel') channelRaw?: string,
+  ): Promise<TranscriptResponseDto> {
+    const channel = (channelRaw ?? 'admin').trim() || 'admin'
+    try {
+      const messages = await this.transcripts.read(botId, channel)
+      return { messages, channel }
+    } catch (err) {
+      this.logger.warn(`Transcript read failed for ${botId}/${channel}: ${(err as Error).message}`)
+      return { messages: [], channel }
+    }
+  }
+
+  @ApiOperation({
+    description:
+      'Delete the persisted chat transcript for a bot/channel. Used to start a fresh chat — the UI clears, refresh shows empty. The agent runtime\'s in-memory session may still hold context until its next restart.',
+    operationId: 'resetBridleTranscript',
+  })
+  @ApiQuery({ name: 'channel', required: false, description: 'Session channel — defaults to "admin".' })
+  @FlatResponse()
+  @Delete(':botId/transcript')
+  @HttpCode(204)
+  async resetTranscript(
+    @Param('botId') botId: string,
+    @Query('channel') channelRaw?: string,
+  ): Promise<void> {
+    const channel = (channelRaw ?? 'admin').trim() || 'admin'
+    try {
+      await this.transcripts.delete(botId, channel)
+    } catch (err) {
+      this.logger.warn(`Transcript reset failed for ${botId}/${channel}: ${(err as Error).message}`)
+    }
   }
 }

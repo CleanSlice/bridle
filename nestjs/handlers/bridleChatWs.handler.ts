@@ -34,7 +34,7 @@ import { IBridleGateway, type BridlePart, buildParts } from '../domain'
  *   "typing"      { ts }
  *   "pong"        { ts }
  */
-@WebSocketGateway({ namespace: '/ws/chat', cors: { origin: '*' } })
+@WebSocketGateway({ namespace: '/ws/chat' })
 export class BridleChatWsHandler implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server
@@ -76,7 +76,7 @@ export class BridleChatWsHandler implements OnGatewayConnection, OnGatewayDiscon
       client.emit(event, data)
     }
 
-    this.hub.registerClient(clientId, botId, send)
+    this.hub.registerClient(clientId, botId, send, isAdmin)
     client.emit('welcome', { clientId })
 
     this.logger.log(`Browser connected: clientId=${clientId} botId=${botId} admin=${isAdmin}`)

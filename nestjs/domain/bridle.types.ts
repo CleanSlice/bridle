@@ -48,6 +48,59 @@ export interface IBridleOutgoingEvent {
   ts?: number
 }
 
+// ── Admin: debug snapshots ───────────────────────────────────
+
+/**
+ * Agent → Hub → Admin browsers only.
+ * Carries a snapshot of what was sent to the LLM and what came back, for
+ * prompt debugging in an admin UI. The hub fans this out only to clients
+ * with `isAdmin === true`. Embedded SDK on public sites never sees this.
+ */
+export interface IBridleDebugEvent {
+  type: 'debug'
+  clientId: string
+  messageId?: string
+  ts: number
+  model: string
+  provider: string
+  systemPrompt: string
+  history: unknown[]
+  response: {
+    text: string
+    toolCalls?: Array<{ name: string; params: unknown }>
+    stopReason?: string
+  }
+  usage?: {
+    inputTokens: number
+    outputTokens: number
+    totalTokens: number
+    credentialId?: string
+  }
+  latencyMs: number
+}
+
+// ── Admin: sync command ──────────────────────────────────────
+
+/** Hub → Agent: command to push agent's local state to remote storage. */
+export interface IBridleSyncRequest {
+  type: 'sync'
+  requestId: string
+}
+
+/** Agent → Hub: ack for a sync command. */
+export interface IBridleSyncResponse {
+  type: 'sync_done'
+  requestId: string
+  pushed: number
+  error?: string
+}
+
+/** Hub → Agent: toggle the agent's debug-snapshot emission. */
+export interface IBridleDebugSet {
+  type: 'debug_set'
+  enabled: boolean
+}
+
 // ── Health ───────────────────────────────────────────────────
 
 /** Health check response */
@@ -69,6 +122,11 @@ export interface IBridleBotHealthData {
 export interface IBridleClientData {
   botId: string
   send: (data: unknown) => void
+  /**
+   * True when the JWT carried an admin role. Admin clients receive admin-only
+   * events (debug snapshots) in addition to normal messages.
+   */
+  isAdmin: boolean
 }
 
 // ── Helpers ──────────────────────────────────────────────────
