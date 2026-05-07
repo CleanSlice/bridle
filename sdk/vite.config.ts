@@ -24,6 +24,11 @@ export default defineConfig({
   ],
   define: {
     __BRIDLE_VERSION__: JSON.stringify(pkg.version),
+    // Vue's runtime ships dev warnings gated by `process.env.NODE_ENV`. In
+    // lib mode Vite preserves these references, so the ESM bundle blows up
+    // in browsers with `process is not defined`. Force the production branch
+    // so dev checks tree-shake away.
+    'process.env.NODE_ENV': JSON.stringify('production'),
   },
   build: {
     outDir: 'dist',
