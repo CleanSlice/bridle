@@ -90,7 +90,7 @@ export type DebugToggleHandler = (enabled: boolean) => void
  * Bridle channel — agent connects TO the Bridle hub as a socket.io client.
  * The hub relays messages between browser users and this agent.
  *
- * Flow:  Browser ↔ /ws/chat ↔ Bridle Hub ↔ /ws/agent ↔ Agent (this)
+ * Flow:  Browser ↔ /ws/client ↔ Bridle Hub ↔ /ws/agent ↔ Agent (this)
  *
  * Events (Hub → Agent):
  *   "message"  { clientId, text, parts, messageId }
@@ -232,7 +232,7 @@ export class BridleRepository implements IChannelGateway {
       reconnectionAttempts: Infinity,
       auth: {
         apiKey: process.env.BRIDLE_API_KEY ?? '',
-        botId: process.env.BRIDLE_BOT_ID ?? '',
+        agentId: process.env.BRIDLE_AGENT_ID ?? '',
       },
     })
 

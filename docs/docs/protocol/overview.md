@@ -5,9 +5,9 @@ The Bridle protocol is what flows on the wire between browsers, the hub, and age
 ```
 Browser (any site)            Bridle Hub (NestJS)          Agent Runtime
      |                             |                             |
-     |--- Socket.IO /ws/chat ----->|                             |
-     |   auth: { token, botId }    |--- Socket.IO /ws/agent ---->|
-     |                             |   auth: { apiKey, botId }   |
+     |--- Socket.IO /ws/client ----->|                             |
+     |   auth: { token, agentId }    |--- Socket.IO /ws/agent ---->|
+     |                             |   auth: { apiKey, agentId }   |
      |<--- stream/message ---------|<--- stream/message ---------|
      |   { text, parts[] }         |   { text, parts[] }         |
 ```
@@ -16,10 +16,10 @@ Browser (any site)            Bridle Hub (NestJS)          Agent Runtime
 
 | Namespace | Who connects | Auth |
 |-----------|--------------|------|
-| `/ws/chat` | Browsers (the SDK) | JWT + botId |
-| `/ws/agent` | Agent runtimes | API key + botId |
+| `/ws/client` | Browsers (the SDK) | JWT + agentId |
+| `/ws/agent` | Agent runtimes | API key + agentId |
 
-The hub never lets the two talk directly — it routes by `botId` and `clientId`.
+The hub never lets the two talk directly — it routes by `agentId` and `clientId`.
 
 ## HTTP fallback
 
@@ -27,23 +27,23 @@ Two HTTP endpoints relay messages without WebSockets:
 
 | Method + path | Purpose |
 |---------------|---------|
-| `POST /api/agent/:botId/message` | Fire-and-forget |
-| `POST /api/agent/:botId/message/sync` | Wait up to 120s for the agent's reply |
+| `POST /api/agent/:agentId/message` | Fire-and-forget |
+| `POST /api/agent/:agentId/message/sync` | Wait up to 120s for the agent's reply |
 
 Plus health endpoints:
 
 | Method + path | Returns |
 |---------------|---------|
 | `GET /api/agent/health` | `{ ok, agentConnected, browserClients }` |
-| `GET /api/agent/:botId/health` | Same, scoped to one bot |
-| `GET /api/agent/:botId/transcript?channel=web` | Persisted chat history |
-| `DELETE /api/agent/:botId/transcript?channel=web` | "New chat" — clear history |
+| `GET /api/agent/:agentId/health` | Same, scoped to one bot |
+| `GET /api/agent/:agentId/transcript?channel=web` | Persisted chat history |
+| `DELETE /api/agent/:agentId/transcript?channel=web` | "New chat" — clear history |
 
 See [HTTP API](/protocol/http) for request/response shapes.
 
 ## What's stateless and what isn't
 
-- **Hub state**: `Map<botId, agentSocket>` and `Map<clientId, browserSocket>`. Nothing persists. A hub restart drops every connection; clients reconnect automatically.
+- **Hub state**: `Map<agentId, agentSocket>` and `Map<clientId, browserSocket>`. Nothing persists. A hub restart drops every connection; clients reconnect automatically.
 - **Browser state**: minimal — the SDK keeps the rendered messages in memory. Refresh = fetch transcript.
 - **Agent state**: agents may persist transcripts and conversation context themselves. The hub doesn't see this.
 

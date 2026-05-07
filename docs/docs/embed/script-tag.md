@@ -8,7 +8,7 @@ The drop-in path. One `<script>` tag, zero build step, works on any HTML page â€
 <script
   src="https://bridle.cleanslice.org/sdk/latest.js"
   data-api-url="https://your-hub.example.com"
-  data-bot-id="bot-abc-123"
+  data-agent-id="agent-abc-123"
   data-token="<jwt>"
 ></script>
 ```
@@ -19,7 +19,7 @@ When the script loads, it auto-registers a `<bridle-chat>` Custom Element and mo
 
 | Attribute | Default | Description |
 |-----------|---------|-------------|
-| `data-bot-id` | **required** | Bot identifier registered on the hub |
+| `data-agent-id` | **required** | Bot identifier registered on the hub |
 | `data-token` | **required** | JWT for browser auth â€” signed by your backend |
 | `data-api-url` | inferred from script's origin | Hub URL, e.g. `https://hub.example.com` |
 | `data-mode` | `floating` | `floating` (FAB in corner) or `inline` (inside `data-mount`) |
@@ -64,7 +64,7 @@ Mount the chat inside a specific container instead of floating:
 <script
   src="https://bridle.cleanslice.org/sdk/latest.js"
   data-api-url="https://your-hub.example.com"
-  data-bot-id="bot-abc-123"
+  data-agent-id="agent-abc-123"
   data-token="<jwt>"
   data-mode="inline"
   data-mount="#support-chat"
@@ -82,7 +82,7 @@ The script exposes a global object so you can also drive the widget from your ow
 <script>
   const chat = window.Bridle.init({
     apiUrl: 'https://your-hub.example.com',
-    botId: 'bot-abc-123',
+    agentId: 'agent-abc-123',
     token: 'eyJhbG...',
     mount: '#chat',
     mode: 'inline',
@@ -96,7 +96,7 @@ The script exposes a global object so you can also drive the widget from your ow
 </script>
 ```
 
-When the script loads without `data-bot-id`, it skips the auto-mount and waits for `Bridle.init({...})` to be called manually.
+When the script loads without `data-agent-id`, it skips the auto-mount and waits for `Bridle.init({...})` to be called manually.
 
 ## CSP
 

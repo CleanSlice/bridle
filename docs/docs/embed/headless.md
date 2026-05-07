@@ -15,7 +15,7 @@ import { BridleClient } from '@cleanslice/bridle'
 
 const client = new BridleClient({
   apiUrl: 'https://your-hub.example.com',
-  botId: 'bot-abc-123',
+  agentId: 'agent-abc-123',
   token: 'eyJhbG...',           // string or () => string | Promise<string>
 })
 
@@ -53,7 +53,7 @@ client.send('Hello')
 ```ts
 interface IBridleClientOptions {
   apiUrl: string
-  botId: string
+  agentId: string
   token: string | (() => string | Promise<string>)
   channel?: string         // optional; default 'web'
 }

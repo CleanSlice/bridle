@@ -1,6 +1,6 @@
 # Bridle Hub Server (NestJS)
 
-Stateless WebSocket relay that routes messages between browser clients and bot agents. Supports multiple bots simultaneously, each scoped by `botId`.
+Stateless WebSocket relay that routes messages between browser clients and bot agents. Supports multiple bots simultaneously, each scoped by `agentId`.
 
 ## Dependencies
 
@@ -43,7 +43,7 @@ export class AppModule {}
 
 Auth is enforced in `handleConnection` -- unauthorized clients are disconnected immediately, before any events are processed.
 
-### Agent auth (`apiKey` + `botId`)
+### Agent auth (`apiKey` + `agentId`)
 
 Agents connect to `/ws/agent` with credentials in the Socket.IO handshake:
 
@@ -51,22 +51,22 @@ Agents connect to `/ws/agent` with credentials in the Socket.IO handshake:
 io('http://hub-host/ws/agent', {
   auth: {
     apiKey: process.env.BRIDLE_API_KEY,
-    botId: process.env.BRIDLE_BOT_ID,
+    agentId: process.env.BRIDLE_AGENT_ID,
   },
 })
 ```
 
-The hub validates `apiKey` against `BRIDLE_API_KEY`. Both `apiKey` and `botId` are required -- missing or mismatched values reject the connection.
+The hub validates `apiKey` against `BRIDLE_API_KEY`. Both `apiKey` and `agentId` are required -- missing or mismatched values reject the connection.
 
-### Browser auth (JWT + `botId`)
+### Browser auth (JWT + `agentId`)
 
-Browsers connect to `/ws/chat` with a JWT and target bot:
+Browsers connect to `/ws/client` with a JWT and target bot:
 
 ```typescript
-io('http://hub-host/ws/chat', {
+io('http://hub-host/ws/client', {
   auth: {
     token: 'eyJhbG...',
-    botId: 'bot-abc-123',
+    agentId: 'bot-abc-123',
   },
 })
 ```
@@ -85,7 +85,7 @@ When the JWT contains `roles: ['ADMIN']`, the hub sets `clientId = 'admin'` inst
 
 ### Per-bot isolation
 
-Each agent registers with a `botId`. Browsers also declare a `botId`. The hub enforces isolation -- messages only flow between matching `botId` pairs. Multiple bots can serve different users through the same hub simultaneously.
+Each agent registers with a `agentId`. Browsers also declare a `agentId`. The hub enforces isolation -- messages only flow between matching `agentId` pairs. Multiple bots can serve different users through the same hub simultaneously.
 
 ### Why `handleConnection`, not NestJS guards?
 
@@ -95,10 +95,10 @@ NestJS WebSocket guards (`@UseGuards`) only run on `@SubscribeMessage` handlers,
 
 | Endpoint | Auth | Description |
 |----------|------|-------------|
-| `POST /api/agent/:botId/message` | Bearer token | Fire-and-forget -- sends message to bot, returns `{ ok: true }` |
-| `POST /api/agent/:botId/message/sync` | Bearer token | Synchronous -- waits for bot response (120s timeout) |
+| `POST /api/agent/:agentId/message` | Bearer token | Fire-and-forget -- sends message to bot, returns `{ ok: true }` |
+| `POST /api/agent/:agentId/message/sync` | Bearer token | Synchronous -- waits for bot response (120s timeout) |
 | `GET /api/agent/health` | -- | Overall hub status |
-| `GET /api/agent/:botId/health` | -- | Per-bot connection status |
+| `GET /api/agent/:agentId/health` | -- | Per-bot connection status |
 
 ### Request body (message endpoints)
 
@@ -124,14 +124,14 @@ NestJS WebSocket guards (`@UseGuards`) only run on `@SubscribeMessage` handlers,
 }
 ```
 
-### Bot health response (`/api/agent/:botId/health`)
+### Bot health response (`/api/agent/:agentId/health`)
 
 ```json
 {
   "ok": true,
   "agentConnected": true,
   "browserClients": 1,
-  "botId": "bot-abc-123"
+  "agentId": "bot-abc-123"
 }
 ```
 
@@ -157,7 +157,7 @@ NestJS WebSocket guards (`@UseGuards`) only run on `@SubscribeMessage` handlers,
 | `typing` | `{ clientId, ts }` | Typing indicator |
 | `ping` | `{}` | Keepalive |
 
-### `/ws/chat` (Browser <-> Hub)
+### `/ws/client` (Browser <-> Hub)
 
 **Browser -> Hub:**
 
@@ -193,7 +193,7 @@ nestjs/
 │   └── index.ts
 ├── handlers/
 │   ├── bridleAgentWs.handler.ts        # /ws/agent WebSocket handler
-│   ├── bridleChatWs.handler.ts         # /ws/chat WebSocket handler
+│   ├── bridleChatWs.handler.ts         # /ws/client WebSocket handler
 │   └── index.ts
 └── dtos/
     ├── sendMessage.dto.ts              # Request DTO (text + images)
@@ -210,10 +210,10 @@ BridleModule
 // Domain (abstract gateway + types)
 IBridleGateway          // Abstract class -- DI token
 IBridleHealthData       // { ok, agentConnected, browserClients }
-IBridleBotHealthData    // { ok, agentConnected, browserClients, botId }
-IBridleIncomingMessage  // Hub -> Agent message (includes botId + parts)
+IBridleBotHealthData    // { ok, agentConnected, browserClients, agentId }
+IBridleIncomingMessage  // Hub -> Agent message (includes agentId + parts)
 IBridleOutgoingEvent    // Agent -> Hub event (includes parts)
-IBridleClientData       // { botId, send } -- registered client metadata
+IBridleClientData       // { agentId, send } -- registered client metadata
 BridlePartTypes         // Enum: Text, Image, File
 BridlePart              // Union type for wire parts
 
@@ -221,14 +221,14 @@ BridlePart              // Union type for wire parts
 BridleGateway           // Hub implementation with per-bot maps
 
 // Presentation
-BridleController        // HTTP endpoints (/:botId scoped)
+BridleController        // HTTP endpoints (/:agentId scoped)
 BridleAgentWsHandler    // Agent WebSocket handler (apiKey auth)
 BridleChatWsHandler     // Browser WebSocket handler (JWT auth)
 
 // DTOs
 SendMessageDto          // Request body (text + parts + legacy images)
 BridleHealthDto         // Response for /api/agent/health
-BridleBotHealthDto      // Response for /api/agent/:botId/health (includes botId)
+BridleBotHealthDto      // Response for /api/agent/:agentId/health (includes agentId)
 ```
 
 ## Protocol

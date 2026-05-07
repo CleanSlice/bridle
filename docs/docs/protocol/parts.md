@@ -92,7 +92,7 @@ The hub also accepts the legacy `{ text, images: [...] }` shape and converts it 
 | Hub → Agent (`message`) | yes |
 | Agent → Hub (`message`, `stream`, `stream_end`) | yes |
 | Hub → Browser (`message`, `stream`, `stream_end`) | yes |
-| HTTP `POST /api/agent/:botId/message[/sync]` | yes (`body.parts`) |
+| HTTP `POST /api/agent/:agentId/message[/sync]` | yes (`body.parts`) |
 
 If `parts` is omitted but `text` is present, the receiver synthesizes a single text part from the text. If both are omitted, the message is dropped.
 

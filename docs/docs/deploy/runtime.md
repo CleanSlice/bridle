@@ -51,22 +51,22 @@ The runtime batches `onChunk` calls into `stream` events at 100ms intervals and 
 |----------|----------|-------------|
 | `BRIDLE_URL` | yes | Hub URL, e.g. `https://hub.example.com` (no trailing slash) |
 | `BRIDLE_API_KEY` | yes | Shared secret — must match the hub's `BRIDLE_API_KEY` |
-| `BRIDLE_BOT_ID` | yes | Identifier for this agent. Browsers use it in their handshake. |
+| `BRIDLE_AGENT_ID` | yes | Identifier for this agent. Browsers use it in their handshake. |
 
 The repository reads these from `process.env` on `connect()`.
 
 ## Multiple bots from one process
 
-`BridleRepository` represents a single bot identity. To serve multiple `botId`s from one process, instantiate multiple repositories:
+`BridleRepository` represents a single bot identity. To serve multiple `agentId`s from one process, instantiate multiple repositories:
 
 ```ts
 const support = new BridleRepository(BRIDLE_URL)
-process.env.BRIDLE_BOT_ID = 'support'
+process.env.BRIDLE_AGENT_ID = 'support'
 support.onMessage(handleSupport)
 await support.start()
 
 const sales = new BridleRepository(BRIDLE_URL)
-process.env.BRIDLE_BOT_ID = 'sales'
+process.env.BRIDLE_AGENT_ID = 'sales'
 sales.onMessage(handleSales)
 await sales.start()
 ```
@@ -109,4 +109,4 @@ bridle.onMessage(async (msg) => {
 
 ## Health
 
-The runtime doesn't expose its own HTTP endpoint by default — the hub's `/api/agent/:botId/health` reflects whether the runtime is connected. For deeper health checks (LLM provider connectivity, queue depth), add your own endpoint to the runtime process.
+The runtime doesn't expose its own HTTP endpoint by default — the hub's `/api/agent/:agentId/health` reflects whether the runtime is connected. For deeper health checks (LLM provider connectivity, queue depth), add your own endpoint to the runtime process.

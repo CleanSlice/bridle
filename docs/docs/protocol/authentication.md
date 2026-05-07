@@ -2,7 +2,7 @@
 
 Both sides of the relay authenticate in the WebSocket handshake. Auth is checked in `handleConnection` — unauthorized clients are disconnected immediately, before any events are processed.
 
-## Agent → Hub (apiKey + botId)
+## Agent → Hub (apiKey + agentId)
 
 Agent runtimes prove identity with a shared API key and declare which bot they serve:
 
@@ -12,22 +12,22 @@ import { io } from 'socket.io-client'
 io('https://your-hub.example.com/ws/agent', {
   auth: {
     apiKey: process.env.BRIDLE_API_KEY,  // shared secret
-    botId: process.env.BRIDLE_BOT_ID,    // which bot this agent serves
+    agentId: process.env.BRIDLE_AGENT_ID,    // which bot this agent serves
   },
 })
 ```
 
-The hub validates `apiKey` against the `BRIDLE_API_KEY` environment variable. If the key is missing or wrong, the connection is rejected. `botId` is required — it scopes all message routing to that bot.
+The hub validates `apiKey` against the `BRIDLE_API_KEY` environment variable. If the key is missing or wrong, the connection is rejected. `agentId` is required — it scopes all message routing to that bot.
 
-## Browser → Hub (JWT + botId)
+## Browser → Hub (JWT + agentId)
 
 Browser clients authenticate with a JWT and specify which bot to chat with:
 
 ```ts
-io('https://your-hub.example.com/ws/chat', {
+io('https://your-hub.example.com/ws/client', {
   auth: {
     token: 'eyJhbG...',                  // JWT from your backend
-    botId: 'bot-abc-123',                // which bot to chat with
+    agentId: 'agent-abc-123',                // which bot to chat with
   },
 })
 ```
@@ -80,8 +80,8 @@ NestJS WebSocket guards (`@UseGuards`) only run on `@SubscribeMessage` handlers.
 ```ts
 // bridleAgentWs.handler.ts (excerpt)
 async handleConnection(client: Socket) {
-  const { apiKey, botId } = client.handshake.auth
-  if (!apiKey || apiKey !== this.config.get('BRIDLE_API_KEY') || !botId) {
+  const { apiKey, agentId } = client.handshake.auth
+  if (!apiKey || apiKey !== this.config.get('BRIDLE_API_KEY') || !agentId) {
     client.disconnect(true)
     return
   }

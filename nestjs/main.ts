@@ -32,7 +32,7 @@ async function bootstrap() {
   console.log(`   BRIDLE_URL=${url}`)
   console.log(`   CORS:     ${corsLabel}`)
   console.log(`   Swagger:  ${url}/api/docs`)
-  console.log(`   WS chat:  ws://localhost:${port}/ws/chat`)
+  console.log(`   WS chat:  ws://localhost:${port}/ws/client`)
   console.log(`   WS agent: ws://localhost:${port}/ws/agent\n`)
 }
 

@@ -17,27 +17,27 @@ export class BridleController {
   @ApiOperation({ description: 'Send a message to a bot agent (HTTP fallback — fire & forget)', operationId: 'sendBridleMessage' })
   @ApiBody({ type: SendMessageDto })
   @FlatResponse()
-  @Post(':botId/message')
+  @Post(':agentId/message')
   @HttpCode(200)
   async sendMessage(
-    @Param('botId') botId: string,
+    @Param('agentId') agentId: string,
     @Req() req: Record<string, unknown>,
     @Body() body: SendMessageDto,
   ) {
     const user = req.user as Record<string, unknown> | undefined
     const clientId = (user?.id as string) ?? 'http-' + crypto.randomUUID()
     const parts = body.parts ?? buildParts(body.text, body.images)
-    this.hub.sendToAgent(clientId, botId, body.text, parts)
+    this.hub.sendToAgent(clientId, agentId, body.text, parts)
     return { ok: true }
   }
 
   @ApiOperation({ description: 'Send a message and wait for the bot agent response (synchronous)', operationId: 'sendBridleMessageSync' })
   @ApiBody({ type: SendMessageDto })
   @FlatResponse()
-  @Post(':botId/message/sync')
+  @Post(':agentId/message/sync')
   @HttpCode(200)
   async sendMessageSync(
-    @Param('botId') botId: string,
+    @Param('agentId') agentId: string,
     @Req() req: Record<string, unknown>,
     @Body() body: SendMessageDto,
   ) {
@@ -52,7 +52,7 @@ export class BridleController {
 
       this.hub.registerClient(
         clientId,
-        botId,
+        agentId,
         (data: unknown) => {
           const event = data as Record<string, unknown>
           if (event.type === 'message' || event.type === 'stream_end') {
@@ -67,7 +67,7 @@ export class BridleController {
       )
 
       const parts = body.parts ?? buildParts(body.text, body.images)
-      this.hub.sendToAgent(clientId, botId, body.text, parts)
+      this.hub.sendToAgent(clientId, agentId, body.text, parts)
     })
   }
 
@@ -82,9 +82,9 @@ export class BridleController {
   @ApiOperation({ description: 'Check bot agent connection status', operationId: 'bridleBotHealth' })
   @FlatResponse()
   @ApiOkResponse({ type: BridleBotHealthDto })
-  @Get(':botId/health')
-  async botHealth(@Param('botId') botId: string) {
-    return this.hub.botHealth(botId)
+  @Get(':agentId/health')
+  async botHealth(@Param('agentId') agentId: string) {
+    return this.hub.botHealth(agentId)
   }
 
   @ApiOperation({ description: 'List all connected agents', operationId: 'listAgents' })
@@ -96,23 +96,23 @@ export class BridleController {
 
   @ApiOperation({
     description:
-      'Replay the persisted chat transcript for a bot. Used to restore the chat UI on page refresh — live updates still arrive via /ws/chat. Returns an empty array when nothing has been persisted yet.',
+      'Replay the persisted chat transcript for a bot. Used to restore the chat UI on page refresh — live updates still arrive via /ws/client. Returns an empty array when nothing has been persisted yet.',
     operationId: 'getBridleTranscript',
   })
   @ApiQuery({ name: 'channel', required: false, description: 'Session channel — defaults to "admin".' })
   @FlatResponse()
   @ApiOkResponse({ type: TranscriptResponseDto })
-  @Get(':botId/transcript')
+  @Get(':agentId/transcript')
   async transcript(
-    @Param('botId') botId: string,
+    @Param('agentId') agentId: string,
     @Query('channel') channelRaw?: string,
   ): Promise<TranscriptResponseDto> {
     const channel = (channelRaw ?? 'admin').trim() || 'admin'
     try {
-      const messages = await this.transcripts.read(botId, channel)
+      const messages = await this.transcripts.read(agentId, channel)
       return { messages, channel }
     } catch (err) {
-      this.logger.warn(`Transcript read failed for ${botId}/${channel}: ${(err as Error).message}`)
+      this.logger.warn(`Transcript read failed for ${agentId}/${channel}: ${(err as Error).message}`)
       return { messages: [], channel }
     }
   }
@@ -124,17 +124,17 @@ export class BridleController {
   })
   @ApiQuery({ name: 'channel', required: false, description: 'Session channel — defaults to "admin".' })
   @FlatResponse()
-  @Delete(':botId/transcript')
+  @Delete(':agentId/transcript')
   @HttpCode(204)
   async resetTranscript(
-    @Param('botId') botId: string,
+    @Param('agentId') agentId: string,
     @Query('channel') channelRaw?: string,
   ): Promise<void> {
     const channel = (channelRaw ?? 'admin').trim() || 'admin'
     try {
-      await this.transcripts.delete(botId, channel)
+      await this.transcripts.delete(agentId, channel)
     } catch (err) {
-      this.logger.warn(`Transcript reset failed for ${botId}/${channel}: ${(err as Error).message}`)
+      this.logger.warn(`Transcript reset failed for ${agentId}/${channel}: ${(err as Error).message}`)
     }
   }
 }

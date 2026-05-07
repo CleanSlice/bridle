@@ -63,14 +63,14 @@ export const useBridleStore = defineStore('bridle', {
   },
 
   actions: {
-    connect(apiUrl: string, botId: string, token: string) {
+    connect(apiUrl: string, agentId: string, token: string) {
       if (this._socket) return
 
-      const socket = io(`${apiUrl}/ws/chat`, {
+      const socket = io(`${apiUrl}/ws/client`, {
         transports: ['websocket'],
         reconnection: true,
         reconnectionDelay: 2000,
-        auth: { token, botId },
+        auth: { token, agentId },
       })
 
       socket.on('connect', () => {
@@ -175,9 +175,9 @@ export const useBridleStore = defineStore('bridle', {
       this.messages = []
     },
 
-    async loadTranscript(apiUrl: string, botId: string, token: string, channel = 'admin') {
+    async loadTranscript(apiUrl: string, agentId: string, token: string, channel = 'admin') {
       try {
-        const url = `${apiUrl.replace(/\/$/, '')}/api/agent/${encodeURIComponent(botId)}/transcript?channel=${encodeURIComponent(channel)}`
+        const url = `${apiUrl.replace(/\/$/, '')}/api/agent/${encodeURIComponent(agentId)}/transcript?channel=${encodeURIComponent(channel)}`
         const res = await fetch(url, {
           headers: { Authorization: `Bearer ${token}` },
         })
@@ -202,8 +202,8 @@ export const useBridleStore = defineStore('bridle', {
       }
     },
 
-    async resetTranscript(apiUrl: string, botId: string, token: string, channel = 'admin') {
-      const url = `${apiUrl.replace(/\/$/, '')}/api/agent/${encodeURIComponent(botId)}/transcript?channel=${encodeURIComponent(channel)}`
+    async resetTranscript(apiUrl: string, agentId: string, token: string, channel = 'admin') {
+      const url = `${apiUrl.replace(/\/$/, '')}/api/agent/${encodeURIComponent(agentId)}/transcript?channel=${encodeURIComponent(channel)}`
       try {
         const res = await fetch(url, {
           method: 'DELETE',

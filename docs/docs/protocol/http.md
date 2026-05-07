@@ -5,7 +5,7 @@ For server-to-server use, fire-and-forget bots, and transcript replay, the hub e
 ## Send a message (fire-and-forget)
 
 ```http
-POST /api/agent/:botId/message
+POST /api/agent/:agentId/message
 Authorization: Bearer <jwt>
 Content-Type: application/json
 
@@ -21,12 +21,12 @@ Response:
 { "ok": true }
 ```
 
-The hub forwards the message to the agent for `:botId` and returns immediately. Use this when you don't care about the reply (notifications, follow-ups dispatched elsewhere).
+The hub forwards the message to the agent for `:agentId` and returns immediately. Use this when you don't care about the reply (notifications, follow-ups dispatched elsewhere).
 
 ## Send a message (synchronous)
 
 ```http
-POST /api/agent/:botId/message/sync
+POST /api/agent/:agentId/message/sync
 Authorization: Bearer <jwt>
 Content-Type: application/json
 
@@ -68,11 +68,11 @@ GET /api/agent/health
 ```
 
 ```http
-GET /api/agent/:botId/health
+GET /api/agent/:agentId/health
 ```
 
 ```json
-{ "ok": true, "agentConnected": true, "browserClients": 3, "botId": "bot-abc-123" }
+{ "ok": true, "agentConnected": true, "browserClients": 3, "agentId": "agent-abc-123" }
 ```
 
 Use these for liveness checks in your monitoring.
@@ -85,8 +85,8 @@ GET /api/agent/agents
 
 ```json
 [
-  { "botId": "bot-a", "clients": 2 },
-  { "botId": "bot-b", "clients": 0 }
+  { "agentId": "bot-a", "clients": 2 },
+  { "agentId": "bot-b", "clients": 0 }
 ]
 ```
 
@@ -95,7 +95,7 @@ GET /api/agent/agents
 The agent runtime is responsible for persisting transcripts (the hub stays stateless). When a transcript is persisted, the hub exposes it for replay:
 
 ```http
-GET /api/agent/:botId/transcript?channel=web
+GET /api/agent/:agentId/transcript?channel=web
 Authorization: Bearer <jwt>
 ```
 
@@ -114,7 +114,7 @@ The SDK calls this on mount to fill the chat with prior history. Returns an empt
 ## Clear transcript ("new chat")
 
 ```http
-DELETE /api/agent/:botId/transcript?channel=web
+DELETE /api/agent/:agentId/transcript?channel=web
 Authorization: Bearer <jwt>
 ```
 
@@ -126,7 +126,7 @@ Removes the persisted transcript for the given channel. The agent's in-memory co
 
 ## Auth
 
-All HTTP endpoints accept the same JWT used for `/ws/chat`. Pass it via `Authorization: Bearer <jwt>`. Anonymous use is **not** supported on the hub.
+All HTTP endpoints accept the same JWT used for `/ws/client`. Pass it via `Authorization: Bearer <jwt>`. Anonymous use is **not** supported on the hub.
 
 The fire-and-forget and sync send endpoints can also be hit by another backend with a service-account JWT — same scheme, same secret.
 
@@ -139,5 +139,5 @@ The `channel` query parameter scopes the transcript namespace. Browsers connecti
 | Status | Meaning |
 |--------|---------|
 | 401 | Missing or invalid JWT |
-| 404 | No transcript for this `botId`/`channel` (returned with `messages: []` instead, in some configurations) |
+| 404 | No transcript for this `agentId`/`channel` (returned with `messages: []` instead, in some configurations) |
 | 503 | Agent not connected (in some flows; sync endpoint returns `ok: true` with a placeholder text message) |

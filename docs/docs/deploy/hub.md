@@ -7,9 +7,9 @@ The hub is a NestJS app that relays messages between browsers and agents. It's s
 ```
 bridle/nestjs/
 ├── bridle.module.ts          # NestJS module
-├── bridle.controller.ts      # HTTP endpoints (/:botId scoped)
+├── bridle.controller.ts      # HTTP endpoints (/:agentId scoped)
 ├── handlers/
-│   ├── bridleChatWs.handler.ts   # /ws/chat (browser, JWT auth)
+│   ├── bridleChatWs.handler.ts   # /ws/client (browser, JWT auth)
 │   └── bridleAgentWs.handler.ts  # /ws/agent (agent, apiKey auth)
 ├── domain/
 │   ├── bridle.types.ts       # Wire protocol types
@@ -79,7 +79,7 @@ Default port is `3333`. Override with `PORT=4000`.
 For horizontal scaling:
 
 - **Sticky sessions** (`ip_hash` in nginx, source affinity in your cloud LB) keeps a connected browser/agent pinned to one replica. Simplest, works with `In-Memory` gateway.
-- **Redis adapter** (`@socket.io/redis-adapter`) fans out events across replicas. Required if a browser and the agent for its `botId` land on different replicas.
+- **Redis adapter** (`@socket.io/redis-adapter`) fans out events across replicas. Required if a browser and the agent for its `agentId` land on different replicas.
 
 For most deployments, sticky sessions are enough — agents are long-lived, browsers reconnect from scratch, and you can put both on the same replica.
 
@@ -91,7 +91,7 @@ Configure your platform's liveness probes against:
 GET /api/agent/health
 ```
 
-Returns `{ ok: true, ... }` always — non-200 only on a hard failure (process crash). For readiness, check `/api/agent/:botId/health` returning `agentConnected: true`.
+Returns `{ ok: true, ... }` always — non-200 only on a hard failure (process crash). For readiness, check `/api/agent/:agentId/health` returning `agentConnected: true`.
 
 ## Logs
 

@@ -53,7 +53,7 @@ function init(opts: IBridleInitOptions): IBridleInstance {
   if (typeof document === 'undefined') {
     throw new Error('[bridle] init() can only run in a browser')
   }
-  if (!opts.botId) throw new Error('[bridle] botId is required')
+  if (!opts.agentId) throw new Error('[bridle] agentId is required')
 
   register()
 
@@ -70,7 +70,7 @@ function init(opts: IBridleInitOptions): IBridleInstance {
     sendMessage?: (text: string) => void
   }
   el.setAttribute('api-url', apiUrl)
-  el.setAttribute('bot-id', opts.botId)
+  el.setAttribute('agent-id', opts.agentId)
   if (opts.mode) el.setAttribute('mode', opts.mode)
   if (opts.title) el.setAttribute('title', opts.title)
   if (opts.placeholder) el.setAttribute('placeholder', opts.placeholder)
@@ -135,11 +135,11 @@ function autoMount(): void {
   const script = _selfScript ?? findOwnScript()
   if (!script) return
   const ds = script.dataset
-  if (!ds.botId) return
+  if (!ds.agentId) return
   const apiUrl = ds.apiUrl ?? new URL(script.src).origin
   init({
     apiUrl,
-    botId: ds.botId,
+    agentId: ds.agentId,
     token: ds.token ?? '',
     mount: ds.mount,
     mode: (ds.mode as 'floating' | 'inline' | undefined) ?? 'floating',

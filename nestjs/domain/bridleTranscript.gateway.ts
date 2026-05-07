@@ -23,18 +23,18 @@ import { IBridleTranscriptMessage } from './bridleTranscript.types'
  */
 export abstract class IBridleTranscriptGateway {
   /**
-   * Return the transcript for `(botId, channel)` ordered oldest→newest.
+   * Return the transcript for `(agentId, channel)` ordered oldest→newest.
    * Return `[]` when nothing has been persisted yet — never throw on a
    * missing transcript, that's the steady state for new bots.
    */
   abstract read(
-    botId: string,
+    agentId: string,
     channel: string,
   ): Promise<IBridleTranscriptMessage[]>
 
   /**
-   * Delete the transcript for `(botId, channel)`. Idempotent — must
+   * Delete the transcript for `(agentId, channel)`. Idempotent — must
    * succeed when nothing exists.
    */
-  abstract delete(botId: string, channel: string): Promise<void>
+  abstract delete(agentId: string, channel: string): Promise<void>
 }

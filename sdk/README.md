@@ -8,7 +8,7 @@ Embeddable webchat for [Bridle](https://bridle.cleanslice.org). One Web Componen
 <script
   src="https://bridle.cleanslice.org/sdk/latest.js"
   data-api-url="https://your-hub.example.com"
-  data-bot-id="bot-abc-123"
+  data-agent-id="agent-abc-123"
   data-token="<jwt>"
 ></script>
 ```
@@ -19,8 +19,8 @@ The script auto-mounts a floating chat bubble in the bottom-right corner. If the
 
 | Attribute | Default | Description |
 |-----------|---------|-------------|
-| `data-bot-id` | required | Bot identifier registered on the hub |
-| `data-token` | optional | JWT for browser auth (omit for public bots) |
+| `data-agent-id` | required | Agent identifier registered on the hub |
+| `data-token` | optional | JWT for browser auth (omit for public agents) |
 | `data-api-url` | inferred | Hub origin |
 | `data-mode` | `floating` | `floating` (FAB) or `inline` (mounted inside `data-mount`) |
 | `data-mount` | `<body>` | CSS selector for inline mode |
@@ -34,7 +34,7 @@ import { init } from '@cleanslice/bridle'
 
 const chat = init({
   apiUrl: 'https://your-hub.example.com',
-  botId: 'bot-abc-123',
+  agentId: 'agent-abc-123',
   token: () => fetchJwt(),     // string OR async function for refresh
   mount: '#chat',              // CSS selector or HTMLElement
   mode: 'inline',
@@ -58,7 +58,7 @@ import { BridleClient } from '@cleanslice/bridle'
 
 const client = new BridleClient({
   apiUrl: 'https://your-hub.example.com',
-  botId: 'bot-abc-123',
+  agentId: 'agent-abc-123',
   token: 'eyJhbG...',
 })
 

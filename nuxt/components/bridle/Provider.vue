@@ -12,7 +12,7 @@ import { cn } from '#theme/utils/cn'
 
 const props = withDefaults(defineProps<{
   apiUrl: string
-  botId: string
+  agentId: string
   token: string
   title?: string
   placeholder?: string
@@ -48,8 +48,8 @@ onMounted(async () => {
   // Clear before load so the previous bot's messages don't briefly leak
   // through (the store is a shared singleton across providers).
   store.clearMessages()
-  await store.loadTranscript(props.apiUrl, props.botId, props.token, props.channel)
-  store.connect(props.apiUrl, props.botId, props.token)
+  await store.loadTranscript(props.apiUrl, props.agentId, props.token, props.channel)
+  store.connect(props.apiUrl, props.agentId, props.token)
 })
 
 onUnmounted(() => {
@@ -71,8 +71,8 @@ async function onNewChat() {
   resetting.value = true
   try {
     store.disconnect()
-    await store.resetTranscript(props.apiUrl, props.botId, props.token, props.channel)
-    store.connect(props.apiUrl, props.botId, props.token)
+    await store.resetTranscript(props.apiUrl, props.agentId, props.token, props.channel)
+    store.connect(props.apiUrl, props.agentId, props.token)
   } finally {
     resetting.value = false
   }

@@ -40,7 +40,7 @@ features:
 <script
   src="https://bridle.cleanslice.org/sdk/latest.js"
   data-api-url="https://your-hub.example.com"
-  data-bot-id="bot-abc-123"
+  data-agent-id="agent-abc-123"
   data-token="<jwt>"
 ></script>
 ```

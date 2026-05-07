@@ -7,7 +7,7 @@ Three steps from zero to a chat bubble that talks to your agent.
 You need:
 
 1. A running Bridle hub. See [Deploy → Hub](/deploy/hub) if you don't have one yet.
-2. An agent runtime connected to the hub on a known `botId`. See [Deploy → Runtime](/deploy/runtime).
+2. An agent runtime connected to the hub on a known `agentId`. See [Deploy → Runtime](/deploy/runtime).
 3. An endpoint in your app that mints a short-lived JWT for the browser. The hub verifies the JWT — see [Authentication](/protocol/authentication) for the required claims.
 
 ## Step 1 — mint a token
@@ -39,7 +39,7 @@ The simplest path — drop one script tag into your HTML:
 <script
   src="https://bridle.cleanslice.org/sdk/latest.js"
   data-api-url="https://your-hub.example.com"
-  data-bot-id="bot-abc-123"
+  data-agent-id="agent-abc-123"
   data-token="<jwt-from-step-1>"
 ></script>
 ```
@@ -66,7 +66,7 @@ When you need to fetch the token from the client (SPA, dynamic auth):
 
   init({
     apiUrl: 'https://your-hub.example.com',
-    botId: 'bot-abc-123',
+    agentId: 'agent-abc-123',
     token,                       // or a function for refresh
     mount: '#chat',
     mode: 'inline',              // embed inside #chat instead of floating
@@ -87,7 +87,7 @@ import { init } from '@cleanslice/bridle'
 
 init({
   apiUrl: import.meta.env.VITE_BRIDLE_URL,
-  botId: 'bot-abc-123',
+  agentId: 'agent-abc-123',
   token: () => fetchJwt(),
   mount: '#chat',
 })
@@ -100,7 +100,7 @@ If you don't want the built-in widget, use the `BridleClient` directly:
 ```ts
 import { BridleClient } from '@cleanslice/bridle'
 
-const client = new BridleClient({ apiUrl, botId, token })
+const client = new BridleClient({ apiUrl, agentId, token })
 
 client.on('message', (m) => render(m.text))
 client.on('stream', (m) => renderPartial(m.text))

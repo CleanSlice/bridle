@@ -1,15 +1,15 @@
 # WebSocket Events
 
-Full reference for events on the `/ws/chat` and `/ws/agent` namespaces.
+Full reference for events on the `/ws/client` and `/ws/agent` namespaces.
 
-## /ws/chat (browser ↔ hub)
+## /ws/client (browser ↔ hub)
 
 ### Handshake
 
 Connect with auth payload:
 
 ```ts
-{ token: '<jwt>', botId: 'bot-abc-123' }
+{ token: '<jwt>', agentId: 'agent-abc-123' }
 ```
 
 The hub disconnects unauthorized clients in `handleConnection` before any events are processed.
@@ -28,7 +28,7 @@ The hub disconnects unauthorized clients in `handleConnection` before any events
 
 | Event | Payload | Effect |
 |-------|---------|--------|
-| `message` | `{ text, parts? }` | Forward to the agent for this `botId` |
+| `message` | `{ text, parts? }` | Forward to the agent for this `agentId` |
 | `ping` | `{}` | Keepalive — hub responds with `pong { ts }` |
 
 The browser's `clientId` is derived from the JWT (`sub`, or `'admin'` for admins) — not sent on outgoing events.
@@ -38,7 +38,7 @@ The browser's `clientId` is derived from the JWT (`sub`, or `'admin'` for admins
 ### Handshake
 
 ```ts
-{ apiKey: '<BRIDLE_API_KEY>', botId: '<bot-id>' }
+{ apiKey: '<BRIDLE_API_KEY>', agentId: '<agent-id>' }
 ```
 
 ### Hub → Agent
@@ -68,7 +68,7 @@ The agent must echo the same `messageId` across `stream` and `stream_end` for on
 | Field | Type | Purpose |
 |-------|------|---------|
 | `clientId` | string | Browser session identifier — assigned by hub from JWT `sub` |
-| `botId` | string | Bot identifier — set in handshake |
+| `agentId` | string | Bot identifier — set in handshake |
 | `messageId` | string | Stable id across stream chunks for one response |
 | `text` | string | Plain-text rollup of all text parts |
 | `parts` | `BridlePart[]` | Rich content array (see [Message Parts](/protocol/parts)) |
@@ -121,4 +121,4 @@ HTTP client       Hub             Agent
    |<--JSON resp---|                |
 ```
 
-`POST /api/agent/:botId/message/sync` waits up to 120 seconds for the agent's reply and returns it as JSON. See [HTTP API](/protocol/http) for the request shape.
+`POST /api/agent/:agentId/message/sync` waits up to 120 seconds for the agent's reply and returns it as JSON. See [HTTP API](/protocol/http) for the request shape.

@@ -6,7 +6,7 @@ import type { IBridleMessage } from './types'
 const props = withDefaults(
   defineProps<{
     apiUrl: string
-    botId: string
+    agentId: string
     token: string
     title?: string
     placeholder?: string
@@ -52,7 +52,7 @@ function upsert(m: IBridleMessage): void {
 function buildClient(): BridleClient {
   return new BridleClient({
     apiUrl: props.apiUrl,
-    botId: props.botId,
+    agentId: props.agentId,
     token: props.token,
   })
 }
@@ -142,16 +142,16 @@ watch(
 // Reconnect when bot/token/api changes — useful for dynamic dashboards.
 // Token may be empty for public bots (auth via Origin whitelist).
 watch(
-  () => [props.apiUrl, props.botId, props.token],
+  () => [props.apiUrl, props.agentId, props.token],
   () => {
-    if (!props.apiUrl || !props.botId) return
+    if (!props.apiUrl || !props.agentId) return
     messages.value = []
     void connect()
   },
 )
 
 onMounted(async () => {
-  if (!props.apiUrl || !props.botId) return
+  if (!props.apiUrl || !props.agentId) return
   await connect()
 })
 

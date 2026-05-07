@@ -43,7 +43,7 @@ The slice registers a `#bridle` alias and auto-imports its components.
 <template>
   <BridleProvider
     api-url="http://localhost:3333"
-    bot-id="bot-abc-123"
+    agent-id="bot-abc-123"
     :token="authToken"
   />
 </template>
@@ -60,7 +60,7 @@ Full chat widget. Handles connection lifecycle, message display, and input.
 | Prop | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
 | `apiUrl` | string | yes | -- | Bridle hub URL |
-| `botId` | string | yes | -- | Which bot to chat with |
+| `agentId` | string | yes | -- | Which bot to chat with |
 | `token` | string | yes | -- | JWT token for authentication |
 | `title` | string | no | `'Agent Chat'` | Header title |
 | `placeholder` | string | no | `'Type a message...'` | Input placeholder |
@@ -142,7 +142,7 @@ store.clearMessages()
 
 ### Connection Handling
 
-The store passes `{ token, botId }` in the Socket.IO auth handshake. If the JWT is invalid or expired, the hub disconnects the client immediately. The store handles `connect_error` -- `isConnected` stays `false` and the error is logged.
+The store passes `{ token, agentId }` in the Socket.IO auth handshake. If the JWT is invalid or expired, the hub disconnects the client immediately. The store handles `connect_error` -- `isConnected` stays `false` and the error is logged.
 
 Auto-reconnect is enabled with a 2-second delay.
 

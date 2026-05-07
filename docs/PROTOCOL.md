@@ -5,9 +5,9 @@ Bridle connects browser users to an agent runtime through a stateless relay hub.
 ```
 Browser (Nuxt UI)             Bridle Hub (NestJS)           Agent Runtime
      |                             |                             |
-     |--- Socket.IO /ws/chat ----->|                             |
-     |   auth: { token, botId }    |--- Socket.IO /ws/agent ---->|
-     |                             |   auth: { apiKey, botId }   |
+     |--- Socket.IO /ws/client ----->|                             |
+     |   auth: { token, agentId }    |--- Socket.IO /ws/agent ---->|
+     |                             |   auth: { apiKey, agentId }   |
      |<--- stream/message ---------|<--- stream/message ---------|
      |   { text, parts[] }         |   { text, parts[] }         |
 ```
@@ -68,43 +68,43 @@ Three participants, two connections:
 
 | Connection | Transport | Auth | Direction |
 |---|---|---|---|
-| Browser <-> Hub | Socket.IO `/ws/chat` | JWT + botId | Bidirectional |
-| Agent <-> Hub | Socket.IO `/ws/agent` | apiKey + botId | Bidirectional |
+| Browser <-> Hub | Socket.IO `/ws/client` | JWT + agentId | Bidirectional |
+| Agent <-> Hub | Socket.IO `/ws/agent` | apiKey + agentId | Bidirectional |
 
 The hub assigns each browser a `clientId` on connection (from JWT `sub`, or `'admin'` for admin users).
-All messages between hub and agent include `clientId` and `botId` for routing.
+All messages between hub and agent include `clientId` and `agentId` for routing.
 
-Multiple agents can connect (one per `botId`). Multiple browsers can connect simultaneously.
+Multiple agents can connect (one per `agentId`). Multiple browsers can connect simultaneously.
 
 ---
 
 ## Connection 1: Browser <-> Hub
 
-**Namespace:** `/ws/chat`
+**Namespace:** `/ws/client`
 **Transport:** Socket.IO (WebSocket upgrade)
-**Auth:** JWT token + botId in handshake
+**Auth:** JWT token + agentId in handshake
 
 ### Authentication
 
 ```typescript
-io('http://hub-host/ws/chat', {
+io('http://hub-host/ws/client', {
   auth: {
     token: '<JWT>',       // Verified by JwtService
-    botId: 'bot-abc-123', // Which bot to chat with
+    agentId: 'bot-abc-123', // Which bot to chat with
   },
 })
 ```
 
-If `token` or `botId` is missing, or the JWT is invalid, the client is disconnected immediately.
+If `token` or `agentId` is missing, or the JWT is invalid, the client is disconnected immediately.
 
 Admin detection: if JWT `roles` includes `'ADMIN'`, `clientId` is set to `'admin'`.
 
 ### Lifecycle
 
 ```
-1. Browser connects to /ws/chat with { token, botId }
+1. Browser connects to /ws/client with { token, agentId }
 2. Hub verifies JWT, extracts clientId from sub (or 'admin')
-3. Hub registers browser under botId
+3. Hub registers browser under agentId
 4. Hub emits  welcome { clientId }  to browser
 5. Browser sends/receives messages
 6. On disconnect, hub unregisters the clientId
@@ -229,7 +229,7 @@ Response to `ping`.
 
 **Namespace:** `/ws/agent`
 **Transport:** Socket.IO (WebSocket upgrade)
-**Auth:** apiKey + botId in handshake
+**Auth:** apiKey + agentId in handshake
 
 ### Authentication
 
@@ -237,22 +237,22 @@ Response to `ping`.
 io('http://hub-host/ws/agent', {
   auth: {
     apiKey: process.env.BRIDLE_API_KEY,
-    botId: process.env.BRIDLE_BOT_ID,
+    agentId: process.env.BRIDLE_AGENT_ID,
   }
 })
 ```
 
-`apiKey` is validated against `BRIDLE_API_KEY` env var. If missing or wrong, the connection is rejected. `botId` is required -- it scopes all routing. Multiple agents can connect (one per `botId`).
+`apiKey` is validated against `BRIDLE_API_KEY` env var. If missing or wrong, the connection is rejected. `agentId` is required -- it scopes all routing. Multiple agents can connect (one per `agentId`).
 
 ### Lifecycle
 
 ```
-1. Agent connects to /ws/agent with { apiKey, botId }
-2. Hub validates apiKey, registers agent under botId
+1. Agent connects to /ws/agent with { apiKey, agentId }
+2. Hub validates apiKey, registers agent under agentId
 3. Agent emits  register {}  to confirm readiness
-4. Hub forwards browser messages (matching botId) to agent
+4. Hub forwards browser messages (matching agentId) to agent
 5. Agent sends responses back through hub
-6. On disconnect, hub unregisters that botId
+6. On disconnect, hub unregisters that agentId
 ```
 
 ### Events: Hub -> Agent
@@ -378,7 +378,7 @@ For clients that cannot use WebSocket.
 
 **Base path:** `/api/agent`
 
-### POST /api/agent/:botId/message
+### POST /api/agent/:agentId/message
 
 Fire-and-forget. Sends a message to the agent but does not wait for a response.
 
@@ -399,7 +399,7 @@ Fire-and-forget. Sends a message to the agent but does not wait for a response.
 { "ok": true }
 ```
 
-### POST /api/agent/:botId/message/sync
+### POST /api/agent/:agentId/message/sync
 
 Synchronous. Sends a message and waits for the complete agent response.
 
@@ -446,7 +446,7 @@ Check overall hub status.
 }
 ```
 
-### GET /api/agent/:botId/health
+### GET /api/agent/:agentId/health
 
 Check per-bot status.
 
@@ -456,7 +456,7 @@ Check per-bot status.
   "ok": true,
   "agentConnected": true,
   "browserClients": 1,
-  "botId": "bot-abc-123"
+  "agentId": "bot-abc-123"
 }
 ```
 
@@ -545,7 +545,7 @@ type BridlePart = IBridleTextPart | IBridleImagePart | IBridleFilePart
 interface IBridleIncomingMessage {
   type: 'message'
   clientId: string
-  botId: string
+  agentId: string
   text: string
   parts: BridlePart[]
   messageId: string
@@ -582,7 +582,7 @@ interface IBridleBotHealthData {
   ok: boolean
   agentConnected: boolean  // Whether this bot's agent is connected
   browserClients: number   // Browsers connected to this bot
-  botId: string            // Bot identifier
+  agentId: string            // Bot identifier
 }
 ```
 
@@ -606,7 +606,7 @@ interface IBridleMessageData {
 | Variable | Where | Required | Description |
 |---|---|---|---|
 | `BRIDLE_API_KEY` | Hub + Agent | yes | Shared secret for agent auth. Hub validates, agent sends. |
-| `BRIDLE_BOT_ID` | Agent | yes | Bot identifier sent in Socket.IO auth handshake |
+| `BRIDLE_AGENT_ID` | Agent | yes | Bot identifier sent in Socket.IO auth handshake |
 | `BRIDLE_URL` | Agent | yes | Hub URL, e.g. `http://localhost:3333` |
 | `JWT_SECRET` | Hub | yes | Secret for JWT verification of browser tokens |
 
@@ -672,7 +672,7 @@ Browser              Hub                 Agent
 Browser              Hub
    |                  |
    |-- message ------>|
-   |                  |  (no agent for this botId)
+   |                  |  (no agent for this agentId)
    |<-- message ------|
    |  { text: "Agent is not connected...",
    |    parts: [{ type: "text", text: "Agent is not connected..." }] }
@@ -683,7 +683,7 @@ Browser              Hub
 ```
 HTTP Client                   Hub                 Agent
    |                           |                    |
-   |-- POST /:botId/message -->|                    |
+   |-- POST /:agentId/message -->|                    |
    |   /sync  { text, parts }  |-- message -------->|
    |                           |                    |  (processing)
    |                           |<-- message --------|

@@ -23,8 +23,8 @@ export interface IBridleInitOptions {
    * served from the same origin as the hub.
    */
   apiUrl?: string
-  /** Bot identifier registered on the hub (`BRIDLE_BOT_ID` on the agent). */
-  botId: string
+  /** Agent identifier registered on the hub (`BRIDLE_AGENT_ID` on the runtime). */
+  agentId: string
   /**
    * JWT used to authenticate the browser to the hub. Pass a string for static
    * tokens, or a function returning a string/Promise<string> for refresh.

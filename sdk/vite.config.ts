@@ -13,7 +13,7 @@ const pkg = JSON.parse(
 //
 // Both are fully self-contained: Vue runtime and socket.io-client are inlined.
 // The IIFE exposes `window.Bridle = { init, BridleClient, ... }` and also
-// auto-mounts whenever the loading <script> tag carries a data-bot-id.
+// auto-mounts whenever the loading <script> tag carries a data-agent-id.
 export default defineConfig({
   plugins: [
     vue({

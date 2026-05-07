@@ -2,16 +2,16 @@ import { Module } from '@nestjs/common'
 import { ConfigModule, ConfigService } from '@nestjs/config'
 import { JwtModule } from '@nestjs/jwt'
 import { BridleController } from './bridle.controller'
-import { BridleChatWsHandler, BridleAgentWsHandler } from './handlers'
+import { BridleClientWsHandler, BridleAgentWsHandler } from './handlers'
 import { IBridleGateway, IBridleTranscriptGateway } from './domain'
 import { BridleGateway, BridleTranscriptNoopGateway } from './data'
 
 /**
  * Bridle Module — authenticated hub between browsers and bot agents.
  *
- * Bot agents connect via /ws/agent (auth: apiKey + botId).
- * Browsers connect via /ws/chat (auth: JWT token + botId).
- * Multiple bots can connect simultaneously — each scoped by botId.
+ * Bot agents connect via /ws/agent (auth: apiKey + agentId).
+ * Browsers connect via /ws/client (auth: JWT token + agentId).
+ * Multiple bots can connect simultaneously — each scoped by agentId.
  *
  * Usage:
  *
@@ -29,16 +29,16 @@ import { BridleGateway, BridleTranscriptNoopGateway } from './data'
  *   - JwtModule (for browser JWT verification)
  *
  * WebSocket endpoints:
- *   /ws/agent  — bot agent connection (apiKey + botId)
- *   /ws/chat   — browser client connection (JWT + botId)
+ *   /ws/agent  — bot agent connection (apiKey + agentId)
+ *   /ws/client   — browser client connection (JWT + agentId)
  *
  * HTTP endpoints:
- *   POST   /api/agent/:botId/message       — fire & forget
- *   POST   /api/agent/:botId/message/sync  — synchronous (120s timeout)
+ *   POST   /api/agent/:agentId/message       — fire & forget
+ *   POST   /api/agent/:agentId/message/sync  — synchronous (120s timeout)
  *   GET    /api/agent/health               — overall hub status
- *   GET    /api/agent/:botId/health        — per-bot status
- *   GET    /api/agent/:botId/transcript    — replay persisted chat history
- *   DELETE /api/agent/:botId/transcript    — clear chat history ("new chat")
+ *   GET    /api/agent/:agentId/health        — per-bot status
+ *   GET    /api/agent/:agentId/transcript    — replay persisted chat history
+ *   DELETE /api/agent/:agentId/transcript    — clear chat history ("new chat")
  *
  * Transcript persistence is consumer-owned. By default `IBridleTranscriptGateway`
  * is bound to a no-op stub; override in your AppModule providers to enable it.
@@ -58,7 +58,7 @@ import { BridleGateway, BridleTranscriptNoopGateway } from './data'
   providers: [
     { provide: IBridleGateway, useClass: BridleGateway },
     { provide: IBridleTranscriptGateway, useClass: BridleTranscriptNoopGateway },
-    BridleChatWsHandler,
+    BridleClientWsHandler,
     BridleAgentWsHandler,
   ],
   controllers: [BridleController],

@@ -4,13 +4,13 @@ import { useBridleStore } from '#bridle/stores/bridle'
 const API = 'http://localhost:3333'
 const route = useRoute()
 
-const botId = computed(() => (route.query.bot as string) || 'default')
+const agentId = computed(() => (route.query.bot as string) || 'default')
 const token = ref('')
 const error = ref('')
 
 const store = useBridleStore()
 
-watch(botId, () => {
+watch(agentId, () => {
   store.disconnect()
   store.clearMessages()
   token.value = ''
@@ -36,16 +36,16 @@ onUnmounted(() => store.disconnect())
     <div class="mb-4">
       <h1 class="text-2xl font-bold tracking-tight">Chat</h1>
       <p class="text-sm text-muted-foreground">
-        Talking to <code class="bg-muted px-1.5 py-0.5 rounded text-xs">{{ botId }}</code>
+        Talking to <code class="bg-muted px-1.5 py-0.5 rounded text-xs">{{ agentId }}</code>
       </p>
     </div>
 
     <Provider
       v-if="token"
       :api-url="API"
-      :bot-id="botId"
+      :agent-id="agentId"
       :token="token"
-      :title="`Agent: ${botId}`"
+      :title="`Agent: ${agentId}`"
       class="w-full max-w-3xl h-[calc(100vh-12rem)]"
     />
 

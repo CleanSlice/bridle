@@ -32,7 +32,7 @@ export type BridlePart = IBridleTextPart | IBridleImagePart | IBridleFilePart
 export interface IBridleIncomingMessage {
   type: 'message'
   clientId: string
-  botId: string
+  agentId: string
   text: string
   messageId: string
   parts: BridlePart[]
@@ -115,12 +115,12 @@ export interface IBridleBotHealthData {
   ok: boolean
   agentConnected: boolean
   browserClients: number
-  botId: string
+  agentId: string
 }
 
 /** Registered client metadata */
 export interface IBridleClientData {
-  botId: string
+  agentId: string
   send: (data: unknown) => void
   /**
    * True when the JWT carried an admin role. Admin clients receive admin-only

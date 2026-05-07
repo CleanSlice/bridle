@@ -5,9 +5,9 @@
 ```
 Browser (any site)           Bridle Hub (NestJS)           Agent Runtime
      |                             |                             |
-     |--- /ws/chat --------------->|                             |
-     |   auth: { token, botId }    |--- /ws/agent -------------->|
-     |                             |   auth: { apiKey, botId }   |
+     |--- /ws/client --------------->|                             |
+     |   auth: { token, agentId }    |--- /ws/agent -------------->|
+     |                             |   auth: { apiKey, agentId }   |
      |<--- stream/message ---------|<--- stream/message ---------|
      |   { text, parts[] }         |   { text, parts[] }         |
 ```
@@ -35,7 +35,7 @@ Browsers can't talk to agent runtimes directly:
 - Browsers need short-lived JWTs; agents need long-lived API keys.
 - You want one agent process serving many browsers without the agent maintaining a TCP server.
 
-The hub solves all three. It's a stateless router: agents register inbound, browsers register inbound, and messages get matched by `botId`.
+The hub solves all three. It's a stateless router: agents register inbound, browsers register inbound, and messages get matched by `agentId`.
 
 ## Why streaming?
 

@@ -3,7 +3,7 @@ import type { BridlePart, IBridleMessage } from './types'
 
 export interface IBridleClientOptions {
   apiUrl: string
-  botId: string
+  agentId: string
   /**
    * JWT for authenticated bots. Omit when the bot is public on the hub —
    * the connection is then authorized by the request `Origin` header.
@@ -21,7 +21,7 @@ type Listener<T = unknown> = (payload: T) => void
  * behavior (connect / send / stream) without the embedded UI.
  *
  * @example
- *   const client = new BridleClient({ apiUrl, botId, token })
+ *   const client = new BridleClient({ apiUrl, agentId, token })
  *   client.on('message', (m) => console.log(m.text))
  *   await client.connect()
  *   client.send('hello')
@@ -41,11 +41,11 @@ export class BridleClient {
         : (this.opts.token ?? '')
     const url = this.opts.apiUrl.replace(/\/$/, '')
 
-    const socket = io(`${url}/ws/chat`, {
+    const socket = io(`${url}/ws/client`, {
       transports: ['websocket'],
       reconnection: true,
       reconnectionDelay: 2000,
-      auth: { token, botId: this.opts.botId },
+      auth: { token, agentId: this.opts.agentId },
     })
 
     socket.on('connect', () => this.fire('open', undefined))

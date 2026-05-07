@@ -11,14 +11,14 @@ Webchat relay for AI agents. Bridle connects browser users to an agent runtime t
 ```
 Browser (Nuxt)               Bridle Hub (NestJS)           Agent Runtime
      |                             |                             |
-     |--- /ws/chat --------------->|                             |
-     |   auth: { token, botId }    |--- /ws/agent -------------->|
-     |                             |   auth: { apiKey, botId }   |
+     |--- /ws/client --------------->|                             |
+     |   auth: { token, agentId }    |--- /ws/agent -------------->|
+     |                             |   auth: { apiKey, agentId }   |
      |<--- stream/message ---------|<--- stream/message ---------|
      |   { text, parts[] }         |   { text, parts[] }         |
 ```
 
-The hub is **stateless** -- it holds no message history. It routes messages between browsers and agents in real time using Socket.IO. Multiple bots can connect simultaneously, each scoped by `botId`. All messages carry rich `parts[]` (text, images, files) alongside a plain `text` shorthand.
+The hub is **stateless** -- it holds no message history. It routes messages between browsers and agents in real time using Socket.IO. Multiple bots can connect simultaneously, each scoped by `agentId`. All messages carry rich `parts[]` (text, images, files) alongside a plain `text` shorthand.
 
 ## Quick Install
 
@@ -42,17 +42,17 @@ Steps:
    - Copy `bridle/nuxt/` into `app/slices/bridle/`
    - Add the slice as a Nuxt layer in `app/nuxt.config.ts`: `extends: ['./slices/bridle']`
    - Install deps: `npm i socket.io-client`
-   - Use the component: `<BridleProvider api-url="http://localhost:3333" bot-id="my-bot" :token="authToken" />`
+   - Use the component: `<BridleProvider api-url="http://localhost:3333" agent-id="my-bot" :token="authToken" />`
    - The component imports from `#theme` (shadcn-vue Card, ScrollArea, etc). Make sure the theme slice exists or adapt imports.
 
 4. **Agent Runtime** — integrate the client:
    - Copy `bridle/runtime/bridle.repository.ts` into the runtime's channel repositories
    - Import and register `BridleRepository` as a channel with apiUrl from env
-   - Add to the bot's `.env`: `BRIDLE_URL=http://localhost:3333`, `BRIDLE_BOT_ID=<bot-id>`, `BRIDLE_API_KEY=<same-as-BRIDLE_API_KEY>`
+   - Add to the bot's `.env`: `BRIDLE_URL=http://localhost:3333`, `BRIDLE_AGENT_ID=<agent-id>`, `BRIDLE_API_KEY=<same-as-BRIDLE_API_KEY>`
 
 5. **Verify**:
    - Start the API, confirm `/api/agent/health` returns `{ ok: true, agentConnected: false, browserClients: 0 }`
-   - Start the agent runtime, confirm it connects and `/api/agent/<botId>/health` shows `agentConnected: true`
+   - Start the agent runtime, confirm it connects and `/api/agent/<agentId>/health` shows `agentConnected: true`
    - Open the Nuxt app with the BridleProvider component, confirm the chat connects and messages flow
 
 Read the bridle README.md and docs/PROTOCOL.md for full auth details, parts format, and type definitions.
@@ -74,7 +74,7 @@ Read the bridle README.md and docs/PROTOCOL.md for full auth details, parts form
 <script
   src="https://bridle.cleanslice.org/sdk/latest.js"
   data-api-url="https://your-hub.example.com"
-  data-bot-id="bot-abc-123"
+  data-agent-id="bot-abc-123"
   data-token="<jwt>"
 ></script>
 ```
@@ -105,7 +105,7 @@ The Nuxt chat UI renders each part type: text as paragraphs, images inline, file
 
 Bridle authenticates both sides of the connection in the Socket.IO handshake. Auth is checked in `handleConnection` -- unauthorized clients are disconnected immediately before any events are processed.
 
-### Agent auth (apiKey + botId)
+### Agent auth (apiKey + agentId)
 
 Agent runtimes prove identity with a shared API key and declare which bot they serve:
 
@@ -113,22 +113,22 @@ Agent runtimes prove identity with a shared API key and declare which bot they s
 io('http://hub-host/ws/agent', {
   auth: {
     apiKey: process.env.BRIDLE_API_KEY,  // Shared secret
-    botId: process.env.BRIDLE_BOT_ID,    // Which bot this agent serves
+    agentId: process.env.BRIDLE_AGENT_ID,    // Which bot this agent serves
   },
 })
 ```
 
-The hub validates `apiKey` against the `BRIDLE_API_KEY` environment variable. If the key is missing or wrong, the connection is rejected. `botId` is required -- it scopes all message routing to that bot.
+The hub validates `apiKey` against the `BRIDLE_API_KEY` environment variable. If the key is missing or wrong, the connection is rejected. `agentId` is required -- it scopes all message routing to that bot.
 
-### Browser auth (JWT + botId)
+### Browser auth (JWT + agentId)
 
 Browser clients authenticate with a JWT token and specify which bot to chat with:
 
 ```typescript
-io('http://hub-host/ws/chat', {
+io('http://hub-host/ws/client', {
   auth: {
     token: 'eyJhbG...',                   // JWT from your auth system
-    botId: 'bot-abc-123',                  // Which bot to chat with
+    agentId: 'bot-abc-123',                  // Which bot to chat with
   },
 })
 ```
@@ -154,15 +154,15 @@ if (msg.from === 'admin') {
 
 ### Per-bot isolation
 
-Each bot agent registers with its own `botId`. Browser clients also declare a `botId` when connecting. The hub enforces isolation:
+Each bot agent registers with its own `agentId`. Browser clients also declare a `agentId` when connecting. The hub enforces isolation:
 
-- Messages from a browser are only forwarded to the agent matching that `botId`
-- Agent responses are only routed to browsers registered under the same `botId`
+- Messages from a browser are only forwarded to the agent matching that `agentId`
+- Agent responses are only routed to browsers registered under the same `agentId`
 - Multiple bots can serve different users simultaneously through the same hub
 
 ```
-Bot A (/ws/agent, botId: "bot-a")     Hub      Browser 1 (/ws/chat, botId: "bot-a")
-Bot B (/ws/agent, botId: "bot-b")     Hub      Browser 2 (/ws/chat, botId: "bot-b")
+Bot A (/ws/agent, agentId: "bot-a")     Hub      Browser 1 (/ws/client, agentId: "bot-a")
+Bot B (/ws/agent, agentId: "bot-b")     Hub      Browser 2 (/ws/client, agentId: "bot-b")
 ```
 
 ### Why handleConnection, not NestJS guards?
@@ -175,12 +175,12 @@ The hub exposes two WebSocket namespaces and an HTTP API:
 
 | Endpoint | Auth | Purpose |
 |----------|------|---------|
-| `/ws/chat` | JWT + botId | Browser clients connect here |
-| `/ws/agent` | apiKey + botId | Agent runtimes connect here |
-| `POST /api/agent/:botId/message` | Bearer token | HTTP fire-and-forget message |
-| `POST /api/agent/:botId/message/sync` | Bearer token | HTTP synchronous message (120s timeout) |
+| `/ws/client` | JWT + agentId | Browser clients connect here |
+| `/ws/agent` | apiKey + agentId | Agent runtimes connect here |
+| `POST /api/agent/:agentId/message` | Bearer token | HTTP fire-and-forget message |
+| `POST /api/agent/:agentId/message/sync` | Bearer token | HTTP synchronous message (120s timeout) |
 | `GET /api/agent/health` | -- | Overall hub status |
-| `GET /api/agent/:botId/health` | -- | Per-bot status |
+| `GET /api/agent/:agentId/health` | -- | Per-bot status |
 
 ### Usage
 
@@ -205,10 +205,10 @@ BridleModule
 // Domain (abstract gateway + types)
 IBridleGateway          // Abstract class -- DI token
 IBridleHealthData       // { ok, agentConnected, browserClients }
-IBridleBotHealthData    // { ok, agentConnected, browserClients, botId }
-IBridleIncomingMessage  // Hub -> Agent message (includes botId + parts)
+IBridleBotHealthData    // { ok, agentConnected, browserClients, agentId }
+IBridleIncomingMessage  // Hub -> Agent message (includes agentId + parts)
 IBridleOutgoingEvent    // Agent -> Hub event (includes parts)
-IBridleClientData       // { botId, send } -- registered client metadata
+IBridleClientData       // { agentId, send } -- registered client metadata
 BridlePartTypes         // Enum: Text, Image, File
 BridlePart              // Union type for wire parts
 buildParts              // Helper: text + images -> BridlePart[]
@@ -218,14 +218,14 @@ getTextFromParts        // Helper: BridlePart[] -> string
 BridleGateway           // Hub implementation with per-bot maps
 
 // Presentation
-BridleController        // HTTP endpoints (/:botId scoped)
+BridleController        // HTTP endpoints (/:agentId scoped)
 BridleAgentWsHandler    // Agent WebSocket handler (apiKey auth)
 BridleChatWsHandler     // Browser WebSocket handler (JWT auth)
 
 // DTOs
 SendMessageDto          // Request body (text + parts + legacy images)
 BridleHealthDto         // Response for /api/agent/health
-BridleBotHealthDto      // Response for /api/agent/:botId/health (includes botId)
+BridleBotHealthDto      // Response for /api/agent/:agentId/health (includes agentId)
 ```
 
 ## Chat UI (Nuxt)
@@ -240,7 +240,7 @@ Add the slice as a Nuxt layer, then use the component:
 <template>
   <BridleProvider
     api-url="http://localhost:3333"
-    bot-id="bot-abc-123"
+    agent-id="bot-abc-123"
     :token="authToken"
   />
 </template>
@@ -259,7 +259,7 @@ Add the slice as a Nuxt layer, then use the component:
 | Prop | Type | Required | Description |
 |------|------|----------|-------------|
 | `apiUrl` | string | yes | Hub server URL |
-| `botId` | string | yes | Which bot to chat with |
+| `agentId` | string | yes | Which bot to chat with |
 | `token` | string | yes | JWT token for authentication |
 | `title` | string | no | Header title (default: "Agent Chat") |
 | `placeholder` | string | no | Input placeholder text |
@@ -297,7 +297,7 @@ export default defineNuxtConfig({
 
 ## Agent Client (Runtime)
 
-`BridleRepository` connects to the hub as a Socket.IO client and implements the `IChannelGateway` interface. It authenticates using `BRIDLE_API_KEY` and `BRIDLE_BOT_ID` environment variables. Sends and receives `parts[]` on the wire.
+`BridleRepository` connects to the hub as a Socket.IO client and implements the `IChannelGateway` interface. It authenticates using `BRIDLE_API_KEY` and `BRIDLE_AGENT_ID` environment variables. Sends and receives `parts[]` on the wire.
 
 ### Usage
 
@@ -334,7 +334,7 @@ The repository reads auth credentials from environment variables on connect:
 ```typescript
 auth: {
   apiKey: process.env.BRIDLE_API_KEY,
-  botId: process.env.BRIDLE_BOT_ID,
+  agentId: process.env.BRIDLE_AGENT_ID,
 }
 ```
 
@@ -370,7 +370,7 @@ See [PROTOCOL.md](./docs/PROTOCOL.md) for the full specification including:
 | Variable | Where | Required | Description |
 |----------|-------|----------|-------------|
 | `BRIDLE_API_KEY` | Hub + Agent | yes | Shared secret for agent auth. Hub validates, agent sends. |
-| `BRIDLE_BOT_ID` | Agent | yes | Bot identifier sent in handshake |
+| `BRIDLE_AGENT_ID` | Agent | yes | Bot identifier sent in handshake |
 | `BRIDLE_URL` | Agent | yes | Hub URL, e.g. `http://localhost:3333` |
 | `JWT_SECRET` | Hub | yes | Secret for JWT verification of browser tokens |
 
@@ -382,13 +382,13 @@ Bridle follows CleanSlice conventions:
 bridle/
 ├── nestjs/                          # Hub server
 │   ├── bridle.module.ts             # NestJS module (ConfigModule + JwtModule)
-│   ├── bridle.controller.ts         # HTTP endpoints (/:botId scoped)
+│   ├── bridle.controller.ts         # HTTP endpoints (/:agentId scoped)
 │   ├── handlers/
 │   │   ├── bridleChatWs.handler.ts  # Browser WebSocket (JWT auth)
 │   │   └── bridleAgentWs.handler.ts # Agent WebSocket (apiKey auth)
 │   ├── domain/
 │   │   ├── bridle.types.ts          # Part types, wire protocol interfaces
-│   │   └── bridle.gateway.ts        # Abstract gateway (botId + parts aware)
+│   │   └── bridle.gateway.ts        # Abstract gateway (agentId + parts aware)
 │   ├── data/
 │   │   └── bridle.gateway.ts        # Concrete implementation (per-bot maps)
 │   └── dtos/
@@ -397,7 +397,7 @@ bridle/
 ├── nuxt/                            # Chat UI
 │   ├── stores/bridle.ts             # Pinia store (parts-aware)
 │   ├── components/bridle/
-│   │   ├── Provider.vue             # Chat widget (apiUrl + botId + token)
+│   │   ├── Provider.vue             # Chat widget (apiUrl + agentId + token)
 │   │   ├── Message.vue              # Renders text, images, files from parts
 │   │   └── Input.vue                # Text input
 │   └── nuxt.config.ts
@@ -413,11 +413,11 @@ bridle/
 
 **Stateless hub.** The hub holds no message history. Browser clients maintain their own message list. This keeps the hub simple and horizontally scalable.
 
-**Per-bot isolation.** `agents: Map<botId, send>` and `clients: Map<clientId, { botId, send }>`. Multiple bots connect simultaneously, each scoped by `botId`. No Socket.IO rooms -- just maps with botId filtering.
+**Per-bot isolation.** `agents: Map<agentId, send>` and `clients: Map<clientId, { agentId, send }>`. Multiple bots connect simultaneously, each scoped by `agentId`. No Socket.IO rooms -- just maps with agentId filtering.
 
 **Auth in handleConnection.** NestJS WS guards only run on `@SubscribeMessage`, not on connect. Checking auth in `handleConnection` + `client.disconnect(true)` ensures unauthorized clients never receive events.
 
-**Shared API key for agents.** All bot runtimes are deployed by the same system. `BRIDLE_API_KEY` provides authentication, `botId` provides identity. No need for per-bot tokens.
+**Shared API key for agents.** All bot runtimes are deployed by the same system. `BRIDLE_API_KEY` provides authentication, `agentId` provides identity. No need for per-bot tokens.
 
 **JWT for browsers.** The admin panel already has a JWT flow. The token is passed in Socket.IO's `auth` field. Admin users (`roles: ['ADMIN']`) get `clientId = 'admin'` for runtime access control integration.
 

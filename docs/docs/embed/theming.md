@@ -42,7 +42,7 @@ When using `init()` programmatically, pass a `theme` map. Keys can include or om
 ```ts
 init({
   apiUrl,
-  botId,
+  agentId,
   token,
   theme: {
     '--bridle-primary': '#0070f3',
@@ -105,7 +105,7 @@ In `mode: 'inline'`, the widget fills its mount container. Set the dimensions on
 <script src=".../sdk/latest.js"
         data-mode="inline"
         data-mount="#chat"
-        data-bot-id="..."
+        data-agent-id="..."
         data-token="..."></script>
 ```
 

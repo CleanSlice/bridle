@@ -19,7 +19,7 @@ import { init } from '@cleanslice/bridle'
 
 const chat = init({
   apiUrl: 'https://your-hub.example.com',
-  botId: 'bot-abc-123',
+  agentId: 'agent-abc-123',
   token: () => fetchJwt(),
   mount: '#chat',
   mode: 'inline',
@@ -31,7 +31,7 @@ const chat = init({
 | Option | Type | Required | Description |
 |--------|------|----------|-------------|
 | `apiUrl` | string | required* | Hub origin |
-| `botId` | string | yes | Bot identifier |
+| `agentId` | string | yes | Bot identifier |
 | `token` | string \| `() => string \| Promise<string>` | yes | JWT or token-getter |
 | `mount` | string \| `HTMLElement` | no | CSS selector or element. Default: `<body>` |
 | `mode` | `'floating' \| 'inline'` | no | Default: `floating` |
@@ -65,7 +65,7 @@ Pass a function instead of a string for tokens that expire:
 ```ts
 init({
   apiUrl,
-  botId,
+  agentId,
   token: async () => {
     const res = await fetch('/api/bridle-token')
     return (await res.json()).token
@@ -91,7 +91,7 @@ let chat: IBridleInstance | null = null
 onMounted(() => {
   chat = init({
     apiUrl: import.meta.env.VITE_BRIDLE_URL,
-    botId: 'bot-abc-123',
+    agentId: 'agent-abc-123',
     token: localStorage.getItem('jwt')!,
     mount: root.value!,
     mode: 'inline',
@@ -120,7 +120,7 @@ export function Chat() {
     let chat: IBridleInstance | null = null
     chat = init({
       apiUrl: import.meta.env.VITE_BRIDLE_URL,
-      botId: 'bot-abc-123',
+      agentId: 'agent-abc-123',
       token: localStorage.getItem('jwt')!,
       mount: ref.current,
       mode: 'inline',

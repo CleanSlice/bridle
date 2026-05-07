@@ -14,10 +14,10 @@ import { IBridleGateway, type BridlePart, buildParts } from '../domain'
 
 /**
  * WebSocket gateway for BROWSER clients.
- * Browsers connect here: ws://hub-host/ws/chat
+ * Browsers connect here: ws://hub-host/ws/client
  *
- * Auth: JWT token + botId in Socket.IO handshake.
- * Token is verified via JwtService. botId scopes the chat to a specific bot.
+ * Auth: JWT token + agentId in Socket.IO handshake.
+ * Token is verified via JwtService. agentId scopes the chat to a specific bot.
  *
  * Admin detection: if JWT payload contains roles including 'ADMIN',
  * clientId is set to 'admin' so the runtime's access control recognizes it.
@@ -34,12 +34,12 @@ import { IBridleGateway, type BridlePart, buildParts } from '../domain'
  *   "typing"      { ts }
  *   "pong"        { ts }
  */
-@WebSocketGateway({ namespace: '/ws/chat' })
-export class BridleChatWsHandler implements OnGatewayConnection, OnGatewayDisconnect {
+@WebSocketGateway({ namespace: '/ws/client' })
+export class BridleClientWsHandler implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server
 
-  private readonly logger = new Logger(BridleChatWsHandler.name)
+  private readonly logger = new Logger(BridleClientWsHandler.name)
 
   constructor(
     private readonly hub: IBridleGateway,
@@ -48,10 +48,10 @@ export class BridleChatWsHandler implements OnGatewayConnection, OnGatewayDiscon
 
   handleConnection(client: Socket) {
     const token = client.handshake.auth?.token as string | undefined
-    const botId = client.handshake.auth?.botId as string | undefined
+    const agentId = client.handshake.auth?.agentId as string | undefined
 
-    if (!token || !botId) {
-      this.logger.warn('Browser connection rejected: missing token or botId')
+    if (!token || !agentId) {
+      this.logger.warn('Browser connection rejected: missing token or agentId')
       client.disconnect(true)
       return
     }
@@ -69,17 +69,17 @@ export class BridleChatWsHandler implements OnGatewayConnection, OnGatewayDiscon
     const isAdmin = Array.isArray(roles) && roles.includes('ADMIN')
     const clientId = isAdmin ? 'admin' : (payload.sub as string)
 
-    client.data = { clientId, botId, email: payload.email, isAdmin }
+    client.data = { clientId, agentId, email: payload.email, isAdmin }
 
     const send = (data: unknown) => {
       const event = (data as Record<string, unknown>)?.type as string ?? 'data'
       client.emit(event, data)
     }
 
-    this.hub.registerClient(clientId, botId, send, isAdmin)
+    this.hub.registerClient(clientId, agentId, send, isAdmin)
     client.emit('welcome', { clientId })
 
-    this.logger.log(`Browser connected: clientId=${clientId} botId=${botId} admin=${isAdmin}`)
+    this.logger.log(`Browser connected: clientId=${clientId} agentId=${agentId} admin=${isAdmin}`)
   }
 
   handleDisconnect(client: Socket) {
@@ -96,14 +96,14 @@ export class BridleChatWsHandler implements OnGatewayConnection, OnGatewayDiscon
     @MessageBody() data: { text?: string; parts?: BridlePart[]; images?: Array<{ base64: string; mediaType: string }> },
   ) {
     const clientId = client.data?.clientId as string
-    const botId = client.data?.botId as string
-    if (!clientId || !botId) return
+    const agentId = client.data?.agentId as string
+    if (!clientId || !agentId) return
 
     const text = data.text ?? ''
     const parts = data.parts ?? buildParts(text, data.images)
     if (!text && parts.length === 0) return
 
-    this.hub.sendToAgent(clientId, botId, text, parts)
+    this.hub.sendToAgent(clientId, agentId, text, parts)
   }
 
   @SubscribeMessage('ping')

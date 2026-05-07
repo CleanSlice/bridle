@@ -23,5 +23,5 @@ export class BridleBotHealthDto implements IBridleBotHealthData {
   browserClients: number
 
   @ApiProperty({ description: 'Bot identifier' })
-  botId: string
+  agentId: string
 }

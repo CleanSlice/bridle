@@ -8,7 +8,7 @@ import { Separator } from '#theme/components/ui/separator'
 const API = 'http://localhost:3333'
 
 interface IAgentInfo {
-  botId: string
+  agentId: string
   clients: number
 }
 
@@ -94,14 +94,14 @@ onUnmounted(() => clearInterval(interval))
 
     <!-- Agent list -->
     <div v-if="agents.length" class="space-y-3">
-      <Card v-for="agent in agents" :key="agent.botId">
+      <Card v-for="agent in agents" :key="agent.agentId">
         <CardContent class="p-4 flex items-center justify-between">
           <div class="flex items-center gap-3">
             <div class="flex h-9 w-9 items-center justify-center rounded-full bg-muted">
               <Bot class="h-4 w-4" />
             </div>
             <div>
-              <p class="font-medium text-sm">{{ agent.botId }}</p>
+              <p class="font-medium text-sm">{{ agent.agentId }}</p>
               <p class="text-xs text-muted-foreground">{{ agent.clients }} active client{{ agent.clients !== 1 ? 's' : '' }}</p>
             </div>
           </div>
@@ -110,7 +110,7 @@ onUnmounted(() => clearInterval(interval))
               <Circle class="h-2 w-2 fill-current mr-1" />
               Online
             </Badge>
-            <NuxtLink :to="`/chat?bot=${agent.botId}`">
+            <NuxtLink :to="`/chat?bot=${agent.agentId}`">
               <Button size="sm" variant="outline">Open Chat</Button>
             </NuxtLink>
           </div>

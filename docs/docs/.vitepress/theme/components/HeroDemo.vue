@@ -2,7 +2,7 @@
 import { onMounted, onBeforeUnmount, ref } from 'vue'
 
 const API_URL = 'https://api.ranch.cleanslice.org'
-const BOT_ID = 'agent-74c579f3-4700-4531-84f6-f8a621f98fa3'
+const AGENT_ID = 'agent-74c579f3-4700-4531-84f6-f8a621f98fa3'
 
 const mountEl = ref<HTMLDivElement | null>(null)
 const error = ref<string | null>(null)
@@ -18,7 +18,7 @@ onMounted(async () => {
     const mod = await import(/* @vite-ignore */ sdkUrl)
     instance = mod.init({
       apiUrl: API_URL,
-      botId: BOT_ID,
+      agentId: AGENT_ID,
       mount: mountEl.value,
       mode: 'inline',
       title: 'Bridle demo',

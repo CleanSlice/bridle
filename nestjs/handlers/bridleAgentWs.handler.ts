@@ -20,10 +20,10 @@ import {
  * WebSocket gateway for AGENT runtime connections.
  * Agents connect here: ws://hub-host/ws/agent
  *
- * Auth: apiKey + botId in Socket.IO handshake.
+ * Auth: apiKey + agentId in Socket.IO handshake.
  * apiKey must match BRIDLE_API_KEY env var.
- * botId identifies which bot this agent serves.
- * Multiple agents can connect (one per botId).
+ * agentId identifies which bot this agent serves.
+ * Multiple agents can connect (one per agentId).
  *
  * Events (Agent → Hub):
  *   "register"    {}
@@ -52,63 +52,63 @@ export class BridleAgentWsHandler implements OnGatewayConnection, OnGatewayDisco
 
   handleConnection(client: Socket) {
     const apiKey = client.handshake.auth?.apiKey as string | undefined
-    const botId = client.handshake.auth?.botId as string | undefined
+    const agentId = client.handshake.auth?.agentId as string | undefined
     const expectedKey = this.config.get<string>('BRIDLE_API_KEY')
 
-    if (!apiKey || !botId || apiKey !== expectedKey) {
-      this.logger.warn(`Agent connection rejected: invalid credentials (botId: ${botId ?? 'none'})`)
+    if (!apiKey || !agentId || apiKey !== expectedKey) {
+      this.logger.warn(`Agent connection rejected: invalid credentials (agentId: ${agentId ?? 'none'})`)
       client.disconnect(true)
       return
     }
 
-    client.data = { botId }
+    client.data = { agentId }
 
     const send = (data: unknown) => {
       const event = (data as Record<string, unknown>)?.type as string ?? 'data'
       client.emit(event, data)
     }
 
-    this.hub.registerAgent(botId, send)
-    this.logger.log(`Agent connected: botId=${botId}`)
+    this.hub.registerAgent(agentId, send)
+    this.logger.log(`Agent connected: agentId=${agentId}`)
   }
 
   handleDisconnect(client: Socket) {
-    const botId = client.data?.botId as string | undefined
-    if (botId) {
-      this.hub.unregisterAgent(botId)
-      this.logger.warn(`Agent disconnected: botId=${botId}`)
+    const agentId = client.data?.agentId as string | undefined
+    if (agentId) {
+      this.hub.unregisterAgent(agentId)
+      this.logger.warn(`Agent disconnected: agentId=${agentId}`)
     }
   }
 
   @SubscribeMessage('message')
   handleMessage(@ConnectedSocket() client: Socket, @MessageBody() data: IBridleOutgoingEvent) {
-    const botId = client.data?.botId as string
-    if (data?.clientId && botId) {
-      this.hub.handleAgentEvent(botId, { ...data, type: 'message' })
+    const agentId = client.data?.agentId as string
+    if (data?.clientId && agentId) {
+      this.hub.handleAgentEvent(agentId, { ...data, type: 'message' })
     }
   }
 
   @SubscribeMessage('stream')
   handleStream(@ConnectedSocket() client: Socket, @MessageBody() data: IBridleOutgoingEvent) {
-    const botId = client.data?.botId as string
-    if (data?.clientId && botId) {
-      this.hub.handleAgentEvent(botId, { ...data, type: 'stream' })
+    const agentId = client.data?.agentId as string
+    if (data?.clientId && agentId) {
+      this.hub.handleAgentEvent(agentId, { ...data, type: 'stream' })
     }
   }
 
   @SubscribeMessage('stream_end')
   handleStreamEnd(@ConnectedSocket() client: Socket, @MessageBody() data: IBridleOutgoingEvent) {
-    const botId = client.data?.botId as string
-    if (data?.clientId && botId) {
-      this.hub.handleAgentEvent(botId, { ...data, type: 'stream_end' })
+    const agentId = client.data?.agentId as string
+    if (data?.clientId && agentId) {
+      this.hub.handleAgentEvent(agentId, { ...data, type: 'stream_end' })
     }
   }
 
   @SubscribeMessage('typing')
   handleTyping(@ConnectedSocket() client: Socket, @MessageBody() data: IBridleOutgoingEvent) {
-    const botId = client.data?.botId as string
-    if (data?.clientId && botId) {
-      this.hub.handleAgentEvent(botId, { ...data, type: 'typing' })
+    const agentId = client.data?.agentId as string
+    if (data?.clientId && agentId) {
+      this.hub.handleAgentEvent(agentId, { ...data, type: 'typing' })
     }
   }
 
@@ -117,9 +117,9 @@ export class BridleAgentWsHandler implements OnGatewayConnection, OnGatewayDisco
     @ConnectedSocket() client: Socket,
     @MessageBody() data: IBridleDebugEvent,
   ) {
-    const botId = client.data?.botId as string
-    if (botId) {
-      this.hub.handleDebugEvent(botId, { ...data, type: 'debug' })
+    const agentId = client.data?.agentId as string
+    if (agentId) {
+      this.hub.handleDebugEvent(agentId, { ...data, type: 'debug' })
     }
   }
 
@@ -128,9 +128,9 @@ export class BridleAgentWsHandler implements OnGatewayConnection, OnGatewayDisco
     @ConnectedSocket() client: Socket,
     @MessageBody() data: IBridleSyncResponse,
   ) {
-    const botId = client.data?.botId as string
-    if (botId && data?.requestId) {
-      this.hub.handleSyncResponse(botId, data)
+    const agentId = client.data?.agentId as string
+    if (agentId && data?.requestId) {
+      this.hub.handleSyncResponse(agentId, data)
     }
   }
 
