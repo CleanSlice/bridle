@@ -51,8 +51,15 @@ export class BridleAgentWsHandler implements OnGatewayConnection, OnGatewayDisco
   ) {}
 
   handleConnection(client: Socket) {
-    const apiKey = client.handshake.auth?.apiKey as string | undefined
-    const agentId = client.handshake.auth?.agentId as string | undefined
+    const auth = (client.handshake.auth ?? {}) as {
+      apiKey?: string
+      agentId?: string
+      botId?: string
+    }
+    const apiKey = auth.apiKey
+    // Accept legacy `botId` so runtimes still on the pre-0.3.0 SDK can
+    // continue connecting through the rename window.
+    const agentId = auth.agentId ?? auth.botId
     const expectedKey = this.config.get<string>('BRIDLE_API_KEY')
 
     if (!apiKey || !agentId || apiKey !== expectedKey) {

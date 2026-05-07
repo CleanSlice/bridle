@@ -47,8 +47,14 @@ export class BridleClientWsHandler implements OnGatewayConnection, OnGatewayDisc
   ) {}
 
   handleConnection(client: Socket) {
-    const token = client.handshake.auth?.token as string | undefined
-    const agentId = client.handshake.auth?.agentId as string | undefined
+    const auth = (client.handshake.auth ?? {}) as {
+      token?: string
+      agentId?: string
+      botId?: string
+    }
+    const token = auth.token
+    // Accept legacy `botId` from cached pre-0.3.0 SDK bundles in the wild.
+    const agentId = auth.agentId ?? auth.botId
 
     if (!token || !agentId) {
       this.logger.warn('Browser connection rejected: missing token or agentId')
