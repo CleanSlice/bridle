@@ -12,7 +12,10 @@ onMounted(async () => {
   if (typeof window === 'undefined' || !mountEl.value) return
 
   try {
-    const mod = await import(/* @vite-ignore */ '/sdk/latest.mjs')
+    // Variable indirection so Rollup doesn't try to resolve the URL at
+    // build time. /sdk/latest.mjs is served from public/ at runtime.
+    const sdkUrl = '/sdk/latest.mjs'
+    const mod = await import(/* @vite-ignore */ sdkUrl)
     instance = mod.init({
       apiUrl: API_URL,
       botId: BOT_ID,
