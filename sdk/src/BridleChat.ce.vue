@@ -349,10 +349,14 @@ defineExpose({
   --bridle-primary: #0070f3;
   --bridle-primary-fg: #ffffff;
   --bridle-bg: #ffffff;
+  --bridle-bg-elv: #ffffff;
   --bridle-fg: #111827;
   --bridle-muted: #6b7280;
   --bridle-bubble-bg: #f3f4f6;
+  --bridle-user-bg: var(--bridle-primary);
+  --bridle-user-fg: var(--bridle-primary-fg);
   --bridle-border: #e5e7eb;
+  --bridle-focus-ring: color-mix(in srgb, var(--bridle-primary) 20%, transparent);
   color-scheme: light;
 }
 
@@ -360,6 +364,7 @@ defineExpose({
 :host([data-color-mode="dark"]),
 :host([data-theme="default"][data-color-mode="dark"]) {
   --bridle-bg: #0f172a;
+  --bridle-bg-elv: #0b1220;
   --bridle-fg: #f1f5f9;
   --bridle-muted: #94a3b8;
   --bridle-bubble-bg: #1e293b;
@@ -372,24 +377,39 @@ defineExpose({
   --bridle-primary: #4A95B0;
   --bridle-primary-fg: #ffffff;
   --bridle-bg: #ffffff;
+  --bridle-bg-elv: #F2F6FA;
   --bridle-fg: #3C4A57;
   --bridle-muted: #6E8796;
   --bridle-bubble-bg: #DDE6ED;
+  --bridle-user-bg: #4A95B0;
+  --bridle-user-fg: #ffffff;
   --bridle-border: #C8D5DF;
+  --bridle-focus-ring: rgba(74, 149, 176, 0.22);
   --bridle-shadow: 0 12px 32px rgba(0, 140, 160, 0.18), 0 0 24px rgba(0, 150, 170, 0.08);
   color-scheme: light;
 }
 
-/* ---- CleanSlice theme — teal/cyan dark ---- */
+/* ---- CleanSlice theme — teal/cyan dark ----
+   Refinements vs. v0.4.0:
+   - User bubble uses a deeper teal (--bridle-user-bg) instead of full primary,
+     so messages don't feel like neon stamps on a dark canvas.
+   - Input strip sits on --bridle-bg-elv (slightly darker than the message
+     area) to create a clear vertical hierarchy.
+   - Shadow is heavier-black, lighter-cyan: keeps depth without the foggy halo.
+   - Focus ring uses an inner glow at lower opacity. */
 :host([data-theme="cleanslice"][data-color-mode="dark"]) {
   --bridle-primary: #5CC6D6;
   --bridle-primary-fg: #0F1C24;
   --bridle-bg: #1A2B36;
+  --bridle-bg-elv: #132531;
   --bridle-fg: #D9E4EC;
-  --bridle-muted: #9CB2BF;
-  --bridle-bubble-bg: #1E3442;
+  --bridle-muted: #8FA8B6;
+  --bridle-bubble-bg: #213642;
+  --bridle-user-bg: #2D5965;
+  --bridle-user-fg: #E8F5F8;
   --bridle-border: #27414F;
-  --bridle-shadow: 0 12px 32px rgba(0, 0, 0, 0.45), 0 0 28px rgba(92, 198, 214, 0.18);
+  --bridle-focus-ring: rgba(92, 198, 214, 0.28);
+  --bridle-shadow: 0 16px 40px rgba(0, 0, 0, 0.55), 0 0 18px rgba(92, 198, 214, 0.10);
   color-scheme: dark;
 }
 
@@ -457,6 +477,7 @@ defineExpose({
   gap: 8px;
   padding: 12px 16px;
   border-bottom: 1px solid var(--bridle-border);
+  background: var(--bridle-bg-elv);
   font-weight: 600;
   font-size: 14px;
   flex-shrink: 0;
@@ -509,8 +530,8 @@ defineExpose({
   word-break: break-word;
 }
 .bridle__msg--user .bridle__bubble {
-  background: var(--bridle-primary);
-  color: var(--bridle-primary-fg);
+  background: var(--bridle-user-bg);
+  color: var(--bridle-user-fg);
   border-bottom-right-radius: 4px;
 }
 .bridle__msg--assistant .bridle__bubble {
@@ -546,6 +567,7 @@ defineExpose({
   gap: 8px;
   padding: 12px;
   border-top: 1px solid var(--bridle-border);
+  background: var(--bridle-bg-elv);
   align-items: flex-end;
   flex-shrink: 0;
 }
@@ -564,10 +586,12 @@ defineExpose({
   outline: none;
   max-height: 120px;
   overflow-y: auto;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
+.bridle__input textarea::placeholder { color: var(--bridle-muted); }
 .bridle__input textarea:focus {
   border-color: var(--bridle-primary);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--bridle-primary) 20%, transparent);
+  box-shadow: 0 0 0 3px var(--bridle-focus-ring);
 }
 .bridle__input textarea:disabled { opacity: 0.6; cursor: not-allowed; }
 
