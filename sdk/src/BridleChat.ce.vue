@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { ref, onMounted, onBeforeUnmount, watch, nextTick, useHost } from 'vue'
 import { BridleClient } from './client'
 import type { IBridleMessage } from './types'
 
@@ -13,12 +13,21 @@ const props = withDefaults(
     mode?: 'floating' | 'inline'
     /** Open the panel by default (floating mode). Honored once on mount. */
     defaultOpen?: boolean | string
+    /** Visual theme. `default` is neutral; `cleanslice` matches the CleanSlice teal palette. */
+    theme?: 'default' | 'cleanslice'
+    /**
+     * Color scheme. `auto` follows the host page (`<html class="dark">` or
+     * `prefers-color-scheme`); `light`/`dark` force one regardless.
+     */
+    colorMode?: 'auto' | 'light' | 'dark'
   }>(),
   {
     title: 'Agent Chat',
     placeholder: 'Type a message...',
     mode: 'floating',
     defaultOpen: false,
+    theme: 'default',
+    colorMode: 'auto',
   },
 )
 
@@ -39,8 +48,64 @@ const scrollEl = ref<HTMLElement | null>(null)
 
 let client: BridleClient | null = null
 
+const host = useHost()
+const resolvedColorMode = ref<'light' | 'dark'>('light')
+let mediaQuery: MediaQueryList | null = null
+let mediaListener: ((e: MediaQueryListEvent) => void) | null = null
+let htmlObserver: MutationObserver | null = null
+
 function coerceBool(v: boolean | string): boolean {
   return v === true || v === 'true' || v === ''
+}
+
+function detectHostColorScheme(): 'light' | 'dark' {
+  if (typeof document === 'undefined') return 'light'
+  // VitePress, Tailwind, shadcn-vue, and most stacks toggle a `.dark` class on
+  // <html>. Honor that first, then fall back to the OS-level media query.
+  if (document.documentElement.classList.contains('dark')) return 'dark'
+  if (typeof window !== 'undefined' && window.matchMedia) {
+    if (window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark'
+  }
+  return 'light'
+}
+
+function applyColorMode(): void {
+  resolvedColorMode.value =
+    props.colorMode === 'auto' ? detectHostColorScheme() : props.colorMode
+  if (host) {
+    host.dataset.theme = props.theme
+    host.dataset.colorMode = resolvedColorMode.value
+  }
+}
+
+function bindAutoColorMode(): void {
+  unbindAutoColorMode()
+  if (props.colorMode !== 'auto' || typeof window === 'undefined') return
+
+  if (window.matchMedia) {
+    mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
+    mediaListener = () => applyColorMode()
+    // `addEventListener` is the modern API; `addListener` is the Safari < 14 fallback.
+    if (mediaQuery.addEventListener) mediaQuery.addEventListener('change', mediaListener)
+    else mediaQuery.addListener(mediaListener)
+  }
+
+  htmlObserver = new MutationObserver(() => applyColorMode())
+  htmlObserver.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['class', 'data-theme'],
+  })
+}
+
+function unbindAutoColorMode(): void {
+  if (mediaQuery && mediaListener) {
+    if (mediaQuery.removeEventListener) mediaQuery.removeEventListener('change', mediaListener)
+    else mediaQuery.removeListener(mediaListener)
+  }
+  mediaQuery = null
+  mediaListener = null
+  htmlObserver?.disconnect()
+  htmlObserver = null
 }
 
 function upsert(m: IBridleMessage): void {
@@ -150,12 +215,23 @@ watch(
   },
 )
 
+watch(
+  () => [props.theme, props.colorMode],
+  () => {
+    applyColorMode()
+    bindAutoColorMode()
+  },
+)
+
 onMounted(async () => {
+  applyColorMode()
+  bindAutoColorMode()
   if (!props.apiUrl || !props.agentId) return
   await connect()
 })
 
 onBeforeUnmount(() => {
+  unbindAutoColorMode()
   client?.disconnect()
   client = null
 })
@@ -257,7 +333,19 @@ defineExpose({
 </template>
 
 <style>
+/* ---- Base / shared tokens ---- */
 :host {
+  --bridle-radius: 14px;
+  --bridle-shadow: 0 12px 32px rgba(0, 0, 0, 0.16);
+  --bridle-z: 2147483600;
+  --bridle-font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  font-family: var(--bridle-font);
+}
+
+/* ---- Default theme — neutral light ---- */
+:host,
+:host([data-theme="default"]) {
   --bridle-primary: #0070f3;
   --bridle-primary-fg: #ffffff;
   --bridle-bg: #ffffff;
@@ -265,24 +353,44 @@ defineExpose({
   --bridle-muted: #6b7280;
   --bridle-bubble-bg: #f3f4f6;
   --bridle-border: #e5e7eb;
-  --bridle-radius: 14px;
-  --bridle-shadow: 0 12px 32px rgba(0, 0, 0, 0.16);
-  --bridle-z: 2147483600;
-  --bridle-font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-
-  font-family: var(--bridle-font);
   color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
-  :host {
-    --bridle-bg: #0f172a;
-    --bridle-fg: #f1f5f9;
-    --bridle-muted: #94a3b8;
-    --bridle-bubble-bg: #1e293b;
-    --bridle-border: #334155;
-    color-scheme: dark;
-  }
+/* ---- Default theme — neutral dark ---- */
+:host([data-color-mode="dark"]),
+:host([data-theme="default"][data-color-mode="dark"]) {
+  --bridle-bg: #0f172a;
+  --bridle-fg: #f1f5f9;
+  --bridle-muted: #94a3b8;
+  --bridle-bubble-bg: #1e293b;
+  --bridle-border: #334155;
+  color-scheme: dark;
+}
+
+/* ---- CleanSlice theme — teal/cyan light ---- */
+:host([data-theme="cleanslice"]) {
+  --bridle-primary: #4A95B0;
+  --bridle-primary-fg: #ffffff;
+  --bridle-bg: #ffffff;
+  --bridle-fg: #3C4A57;
+  --bridle-muted: #6E8796;
+  --bridle-bubble-bg: #DDE6ED;
+  --bridle-border: #C8D5DF;
+  --bridle-shadow: 0 12px 32px rgba(0, 140, 160, 0.18), 0 0 24px rgba(0, 150, 170, 0.08);
+  color-scheme: light;
+}
+
+/* ---- CleanSlice theme — teal/cyan dark ---- */
+:host([data-theme="cleanslice"][data-color-mode="dark"]) {
+  --bridle-primary: #5CC6D6;
+  --bridle-primary-fg: #0F1C24;
+  --bridle-bg: #1A2B36;
+  --bridle-fg: #D9E4EC;
+  --bridle-muted: #9CB2BF;
+  --bridle-bubble-bg: #1E3442;
+  --bridle-border: #27414F;
+  --bridle-shadow: 0 12px 32px rgba(0, 0, 0, 0.45), 0 0 28px rgba(92, 198, 214, 0.18);
+  color-scheme: dark;
 }
 
 .bridle--floating {

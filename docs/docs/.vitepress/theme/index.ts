@@ -1,7 +1,7 @@
 import { h } from 'vue'
 import DefaultTheme from 'vitepress/theme'
 import HeroDemo from './components/HeroDemo.vue'
-import './custom.css'
+import './cleanslice.css'
 
 export default {
   extends: DefaultTheme,

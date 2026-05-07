@@ -23,6 +23,8 @@ onMounted(async () => {
       mode: 'inline',
       title: 'Bridle demo',
       placeholder: 'Ask the demo bot anything…',
+      theme: 'cleanslice',
+      colorMode: 'auto',
       onError: (err: Error) => {
         error.value = err.message || String(err)
       },

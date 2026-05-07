@@ -42,9 +42,9 @@ function findOwnScript(): HTMLScriptElement | undefined {
   return undefined
 }
 
-function applyTheme(el: HTMLElement, theme: Record<string, string> | undefined): void {
-  if (!theme) return
-  for (const [k, v] of Object.entries(theme)) {
+function applyThemeVars(el: HTMLElement, vars: Record<string, string> | undefined): void {
+  if (!vars) return
+  for (const [k, v] of Object.entries(vars)) {
     el.style.setProperty(k.startsWith('--') ? k : `--${k}`, v)
   }
 }
@@ -74,8 +74,10 @@ function init(opts: IBridleInitOptions): IBridleInstance {
   if (opts.mode) el.setAttribute('mode', opts.mode)
   if (opts.title) el.setAttribute('title', opts.title)
   if (opts.placeholder) el.setAttribute('placeholder', opts.placeholder)
+  if (opts.theme) el.setAttribute('theme', opts.theme)
+  if (opts.colorMode) el.setAttribute('color-mode', opts.colorMode)
 
-  applyTheme(el, opts.theme)
+  applyThemeVars(el, opts.themeVars)
 
   // Resolve the token. Static strings are set immediately; functions are called
   // and the result is set when ready. The Vue prop-watcher inside the element
@@ -145,6 +147,8 @@ function autoMount(): void {
     mode: (ds.mode as 'floating' | 'inline' | undefined) ?? 'floating',
     title: ds.title,
     placeholder: ds.placeholder,
+    theme: ds.theme as 'default' | 'cleanslice' | undefined,
+    colorMode: ds.colorMode as 'auto' | 'light' | 'dark' | undefined,
   })
 }
 

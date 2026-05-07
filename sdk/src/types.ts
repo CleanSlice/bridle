@@ -46,10 +46,20 @@ export interface IBridleInitOptions {
   /** Input placeholder. Default: "Type a message...". */
   placeholder?: string
   /**
-   * Theme overrides — any of the documented CSS custom properties.
+   * Built-in palette. `default` is a neutral blue/grey; `cleanslice` matches
+   * the CleanSlice teal/cyan palette. Default: `default`.
+   */
+  theme?: 'default' | 'cleanslice'
+  /**
+   * Color scheme. `auto` (default) follows the host page — `<html class="dark">`
+   * first, then `prefers-color-scheme`. Pass `light` or `dark` to force one.
+   */
+  colorMode?: 'auto' | 'light' | 'dark'
+  /**
+   * CSS custom-property overrides applied on top of the chosen theme.
    * Example: `{ '--bridle-primary': '#0070f3' }`.
    */
-  theme?: Record<string, string>
+  themeVars?: Record<string, string>
   /** Hooks for headless side effects in addition to the UI. */
   onReady?: () => void
   onMessage?: (message: IBridleMessage) => void
