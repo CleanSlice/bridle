@@ -47,6 +47,17 @@ function buildParts(text: string, images?: Array<{ base64: string; mediaType: st
   return parts
 }
 
+// Tool-only LLM iterations cause the runtime's bridle channel to emit
+// stream/stream_end events with empty text. Without this guard each one
+// renders as an empty chat bubble.
+function hasVisibleContent(text: string, parts: BridlePart[]): boolean {
+  if (text && text.trim().length > 0) return true
+  return parts.some(p => {
+    if (p.type === BridlePartTypes.Image || p.type === BridlePartTypes.File) return true
+    return p.type === BridlePartTypes.Text && p.text.trim().length > 0
+  })
+}
+
 export const useBridleStore = defineStore('bridle', {
   state: () => ({
     messages: [] as IBridleMessageData[],
@@ -94,6 +105,7 @@ export const useBridleStore = defineStore('bridle', {
         this.isTyping = false
         const text = data.text ?? ''
         const parts = data.parts ?? (text ? [{ type: BridlePartTypes.Text as const, text }] : [])
+        if (!hasVisibleContent(text, parts)) return
         this.messages.push({
           id: data.messageId ?? crypto.randomUUID(),
           role: 'assistant',
@@ -115,6 +127,9 @@ export const useBridleStore = defineStore('bridle', {
         if (idx >= 0) {
           this.messages[idx] = { ...this.messages[idx], text, parts, streaming: true }
         } else {
+          // Don't create a fresh bubble for an empty initial chunk — wait
+          // until the runtime actually has visible content.
+          if (!hasVisibleContent(text, parts)) return
           this.messages.push({
             id: data.messageId ?? crypto.randomUUID(),
             role: 'assistant',
@@ -134,6 +149,7 @@ export const useBridleStore = defineStore('bridle', {
         if (idx >= 0) {
           this.messages[idx] = { ...this.messages[idx], text, parts, streaming: false }
         } else {
+          if (!hasVisibleContent(text, parts)) return
           this.messages.push({
             id: data.messageId ?? crypto.randomUUID(),
             role: 'assistant',
