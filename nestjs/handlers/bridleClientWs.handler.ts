@@ -10,29 +10,39 @@ import {
 import { Logger } from '@nestjs/common'
 import { JwtService } from '@nestjs/jwt'
 import { Server, Socket } from 'socket.io'
-import { IBridleGateway, type BridlePart, buildParts } from '../domain'
+import {
+  IBridleGateway,
+  IBridleAuthGateway,
+  type BridlePart,
+  buildParts,
+} from '../domain'
 
 /**
  * WebSocket gateway for BROWSER clients.
  * Browsers connect here: ws://hub-host/ws/client
  *
- * Auth: JWT token + agentId in Socket.IO handshake.
- * Token is verified via JwtService. agentId scopes the chat to a specific bot.
+ * Auth (two paths):
+ *   1. Public flow — IBridleAuthGateway returns `{ isPublic: true, allowedOrigins }`
+ *      for the agentId AND the request `Origin` header is in `allowedOrigins`.
+ *      No JWT required; clientId is anonymous (`anon-<random>`).
+ *   2. Authenticated — JWT token + agentId in handshake auth, JWT verified.
+ *      Admin role grants `clientId = "admin"` for runtime ACL.
  *
- * Admin detection: if JWT payload contains roles including 'ADMIN',
- * clientId is set to 'admin' so the runtime's access control recognizes it.
+ * The default `IBridleAuthGateway` implementation always returns `null`, so
+ * out of the box every connection takes path 2.
  *
  * Events (browser → hub):
  *   "message"  { text, images? }
  *   "ping"     {}
  *
  * Events (hub → browser):
- *   "welcome"     { clientId }
- *   "message"     { text, messageId, ts }
- *   "stream"      { text, messageId, ts }
- *   "stream_end"  { text, messageId, ts }
- *   "typing"      { ts }
- *   "pong"        { ts }
+ *   "welcome"       { clientId }
+ *   "agent_status"  { agentId, connected }    // current state, then on every register/unregister
+ *   "message"       { text, messageId, ts }
+ *   "stream"        { text, messageId, ts }
+ *   "stream_end"    { text, messageId, ts }
+ *   "typing"        { ts }
+ *   "pong"          { ts }
  */
 @WebSocketGateway({ namespace: '/ws/client' })
 export class BridleClientWsHandler implements OnGatewayConnection, OnGatewayDisconnect {
@@ -44,38 +54,68 @@ export class BridleClientWsHandler implements OnGatewayConnection, OnGatewayDisc
   constructor(
     private readonly hub: IBridleGateway,
     private readonly jwt: JwtService,
+    private readonly auth: IBridleAuthGateway,
   ) {}
 
-  handleConnection(client: Socket) {
-    const auth = (client.handshake.auth ?? {}) as {
+  async handleConnection(client: Socket) {
+    const handshakeAuth = (client.handshake.auth ?? {}) as {
       token?: string
       agentId?: string
       botId?: string
     }
-    const token = auth.token
     // Accept legacy `botId` from cached pre-0.3.0 SDK bundles in the wild.
-    const agentId = auth.agentId ?? auth.botId
+    const agentId = handshakeAuth.agentId ?? handshakeAuth.botId
 
-    if (!token || !agentId) {
-      this.logger.warn('Browser connection rejected: missing token or agentId')
+    if (!agentId) {
+      this.logger.warn('Browser connection rejected: missing agentId')
       client.disconnect(true)
       return
     }
 
-    let payload: Record<string, unknown>
-    try {
-      payload = this.jwt.verify(token) as Record<string, unknown>
-    } catch {
-      this.logger.warn('Browser connection rejected: invalid JWT')
-      client.disconnect(true)
-      return
+    const origin = client.handshake.headers.origin
+    const agentAuth = await this.auth.getAgentAuth(agentId)
+
+    let clientId: string
+    let isAdmin = false
+    let email: string | undefined
+
+    if (
+      agentAuth?.isPublic &&
+      origin &&
+      agentAuth.allowedOrigins.includes(origin)
+    ) {
+      // Public flow: anonymous browser session, no token required.
+      clientId = `anon-${randomId()}`
+      this.logger.log(
+        `Browser connected (public): clientId=${clientId} agentId=${agentId} origin=${origin}`,
+      )
+    } else {
+      // Authenticated flow: JWT required.
+      const token = handshakeAuth.token
+      if (!token) {
+        this.logger.warn(
+          `Browser connection rejected: missing token (agentId=${agentId}, origin=${origin ?? 'none'})`,
+        )
+        client.disconnect(true)
+        return
+      }
+
+      let payload: Record<string, unknown>
+      try {
+        payload = this.jwt.verify(token) as Record<string, unknown>
+      } catch {
+        this.logger.warn('Browser connection rejected: invalid JWT')
+        client.disconnect(true)
+        return
+      }
+
+      const roles = payload.roles as string[] | undefined
+      isAdmin = Array.isArray(roles) && roles.includes('ADMIN')
+      clientId = isAdmin ? 'admin' : (payload.sub as string)
+      email = payload.email as string | undefined
     }
 
-    const roles = payload.roles as string[] | undefined
-    const isAdmin = Array.isArray(roles) && roles.includes('ADMIN')
-    const clientId = isAdmin ? 'admin' : (payload.sub as string)
-
-    client.data = { clientId, agentId, email: payload.email, isAdmin }
+    client.data = { clientId, agentId, email, isAdmin }
 
     const send = (data: unknown) => {
       const event = (data as Record<string, unknown>)?.type as string ?? 'data'
@@ -84,6 +124,14 @@ export class BridleClientWsHandler implements OnGatewayConnection, OnGatewayDisc
 
     this.hub.registerClient(clientId, agentId, send, isAdmin)
     client.emit('welcome', { clientId })
+    // Snapshot the runtime's current online state immediately so the chat UI
+    // can render the right indicator before any subsequent register/unregister
+    // broadcasts arrive.
+    client.emit('agent_status', {
+      type: 'agent_status',
+      agentId,
+      connected: this.hub.isAgentConnected(agentId),
+    })
 
     this.logger.log(`Browser connected: clientId=${clientId} agentId=${agentId} admin=${isAdmin}`)
   }
@@ -116,4 +164,10 @@ export class BridleClientWsHandler implements OnGatewayConnection, OnGatewayDisc
   handlePing(@ConnectedSocket() client: Socket) {
     client.emit('pong', { ts: Date.now() })
   }
+}
+
+function randomId(): string {
+  return (
+    Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4)
+  )
 }

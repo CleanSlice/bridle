@@ -11,6 +11,7 @@ import { ConfigService } from '@nestjs/config'
 import { Socket } from 'socket.io'
 import {
   IBridleGateway,
+  IBridleAuthGateway,
   type IBridleOutgoingEvent,
   type IBridleDebugEvent,
   type IBridleSyncResponse,
@@ -22,7 +23,7 @@ import {
  *
  * Auth: apiKey + agentId in Socket.IO handshake.
  * apiKey must match BRIDLE_API_KEY env var.
- * agentId identifies which bot this agent serves.
+ * agentId identifies which agent this runtime serves.
  * Multiple agents can connect (one per agentId).
  *
  * Events (Agent → Hub):
@@ -48,6 +49,7 @@ export class BridleAgentWsHandler implements OnGatewayConnection, OnGatewayDisco
   constructor(
     private readonly hub: IBridleGateway,
     private readonly config: ConfigService,
+    private readonly auth: IBridleAuthGateway,
   ) {}
 
   handleConnection(client: Socket) {
@@ -77,6 +79,21 @@ export class BridleAgentWsHandler implements OnGatewayConnection, OnGatewayDisco
 
     this.hub.registerAgent(agentId, send)
     this.logger.log(`Agent connected: agentId=${agentId}`)
+
+    // Re-apply debug flag so a freshly-started runtime picks up whatever the
+    // admin toggled while it was offline. Fire-and-forget — debug is non-
+    // critical and the WS handshake must not block on a DB query. Returns
+    // null (= skip) when the consumer hasn't overridden IBridleAuthGateway.
+    this.auth
+      .getAgentAuth(agentId)
+      .then((agentAuth) => {
+        if (agentAuth?.debugEnabled) {
+          this.hub.setDebug(agentId, true)
+        }
+      })
+      .catch((err: Error) => {
+        this.logger.warn(`Debug rehydrate failed for ${agentId}: ${err.message}`)
+      })
   }
 
   handleDisconnect(client: Socket) {

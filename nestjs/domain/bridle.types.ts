@@ -40,12 +40,23 @@ export interface IBridleIncomingMessage {
 
 /** Agent → Hub: events routed to browser clients */
 export interface IBridleOutgoingEvent {
-  type: 'register' | 'message' | 'stream' | 'stream_end' | 'typing' | 'ping'
+  type:
+    | 'register'
+    | 'message'
+    | 'stream'
+    | 'stream_end'
+    | 'typing'
+    | 'ping'
+    | 'agent_status'
   clientId?: string
   text?: string
   parts?: BridlePart[]
   messageId?: string
   ts?: number
+  /** Set on `agent_status` events emitted by the hub. */
+  agentId?: string
+  /** Set on `agent_status` events: true when an agent runtime is currently registered. */
+  connected?: boolean
 }
 
 // ── Admin: debug snapshots ───────────────────────────────────
@@ -110,8 +121,8 @@ export interface IBridleHealthData {
   browserClients: number
 }
 
-/** Per-bot health check response */
-export interface IBridleBotHealthData {
+/** Per-agent health check response */
+export interface IBridleAgentHealthData {
   ok: boolean
   agentConnected: boolean
   browserClients: number

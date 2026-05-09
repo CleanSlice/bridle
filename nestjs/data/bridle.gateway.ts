@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common'
 import { IBridleGateway, type IBridleSyncAgentResult } from '../domain/bridle.gateway'
 import type {
   IBridleHealthData,
-  IBridleBotHealthData,
+  IBridleAgentHealthData,
   IBridleOutgoingEvent,
   IBridleDebugEvent,
   IBridleSyncResponse,
@@ -21,8 +21,8 @@ interface IPendingSync {
 const DEFAULT_SYNC_TIMEOUT_MS = 15_000
 
 /**
- * Hub implementation — manages per-bot agent connections and per-bot browser
- * client connections. Routes messages between them scoped by agentId.
+ * Hub implementation — manages per-agent runtime connections and per-agent
+ * browser client connections. Routes messages between them scoped by agentId.
  */
 @Injectable()
 export class BridleGateway extends IBridleGateway {
@@ -40,17 +40,31 @@ export class BridleGateway extends IBridleGateway {
   registerAgent(agentId: string, send: (data: unknown) => void): void {
     this.agents.set(agentId, send)
     this.logger.log(`Agent registered: agentId=${agentId} (total agents: ${this.agents.size})`)
+    this.broadcastAgentStatus(agentId, true)
   }
 
   unregisterAgent(agentId: string): void {
     this.agents.delete(agentId)
     this.logger.warn(`Agent unregistered: agentId=${agentId} (total agents: ${this.agents.size})`)
-    // Cancel any pending sync requests for this bot — agent dropped before acking
+    // Cancel any pending sync requests for this agent — runtime dropped before acking
     for (const [requestId, pending] of this.pendingSyncs) {
       if (pending.agentId !== agentId) continue
       clearTimeout(pending.timer)
       this.pendingSyncs.delete(requestId)
       pending.reject(new Error('Agent disconnected before sync completed'))
+    }
+    this.broadcastAgentStatus(agentId, false)
+  }
+
+  isAgentConnected(agentId: string): boolean {
+    return this.agents.has(agentId)
+  }
+
+  private broadcastAgentStatus(agentId: string, connected: boolean): void {
+    const event = { type: 'agent_status' as const, agentId, connected }
+    for (const client of this.clients.values()) {
+      if (client.agentId !== agentId) continue
+      client.send(event)
     }
   }
 
@@ -124,7 +138,7 @@ export class BridleGateway extends IBridleGateway {
   handleDebugEvent(agentId: string, data: IBridleDebugEvent): void {
     // Admin-only fan-out. We ignore data.clientId on purpose: the runtime
     // only knows the immediate sender, but multiple admins may be observing
-    // the same bot and they all want to see prompt traces.
+    // the same agent and they all want to see prompt traces.
     let delivered = 0
     for (const client of this.clients.values()) {
       if (client.agentId !== agentId) continue
@@ -183,7 +197,7 @@ export class BridleGateway extends IBridleGateway {
     }
   }
 
-  botHealth(agentId: string): IBridleBotHealthData {
+  agentHealth(agentId: string): IBridleAgentHealthData {
     let clientCount = 0
     for (const client of this.clients.values()) {
       if (client.agentId === agentId) clientCount++

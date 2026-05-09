@@ -448,7 +448,7 @@ Check overall hub status.
 
 ### GET /api/agent/:agentId/health
 
-Check per-bot status.
+Check per-agent status.
 
 **Response:** `200 OK`
 ```json
@@ -575,14 +575,14 @@ interface IBridleHealthData {
 }
 ```
 
-### IBridleBotHealthData
+### IBridleAgentHealthData
 
 ```typescript
-interface IBridleBotHealthData {
+interface IBridleAgentHealthData {
   ok: boolean
-  agentConnected: boolean  // Whether this bot's agent is connected
-  browserClients: number   // Browsers connected to this bot
-  agentId: string            // Bot identifier
+  agentConnected: boolean  // Whether this agent's runtime is connected
+  browserClients: number   // Browsers connected to this agent
+  agentId: string          // Agent identifier
 }
 ```
 

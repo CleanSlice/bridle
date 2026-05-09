@@ -124,7 +124,7 @@ NestJS WebSocket guards (`@UseGuards`) only run on `@SubscribeMessage` handlers,
 }
 ```
 
-### Bot health response (`/api/agent/:agentId/health`)
+### Agent health response (`/api/agent/:agentId/health`)
 
 ```json
 {
@@ -163,7 +163,7 @@ NestJS WebSocket guards (`@UseGuards`) only run on `@SubscribeMessage` handlers,
 
 | Event | Payload | Description |
 |-------|---------|-------------|
-| `message` | `{ text, parts?, images? }` | Send message to bot |
+| `message` | `{ text, parts?, images? }` | Send message to agent |
 | `ping` | `{}` | Keepalive |
 
 **Hub -> Browser:**
@@ -189,7 +189,7 @@ nestjs/
 │   ├── bridle.types.ts                 # Interfaces (IBridleIncomingMessage, etc.)
 │   └── index.ts
 ├── data/
-│   ├── bridle.gateway.ts               # Concrete gateway (per-bot routing maps)
+│   ├── bridle.gateway.ts               # Concrete gateway (per-agent routing maps)
 │   └── index.ts
 ├── handlers/
 │   ├── bridleAgentWs.handler.ts        # /ws/agent WebSocket handler
@@ -197,7 +197,7 @@ nestjs/
 │   └── index.ts
 └── dtos/
     ├── sendMessage.dto.ts              # Request DTO (text + images)
-    ├── bridleHealth.dto.ts             # Health response DTOs (BridleHealthDto + BridleBotHealthDto)
+    ├── bridleHealth.dto.ts             # Health response DTOs (BridleHealthDto + BridleAgentHealthDto)
     └── index.ts
 ```
 
@@ -210,7 +210,7 @@ BridleModule
 // Domain (abstract gateway + types)
 IBridleGateway          // Abstract class -- DI token
 IBridleHealthData       // { ok, agentConnected, browserClients }
-IBridleBotHealthData    // { ok, agentConnected, browserClients, agentId }
+IBridleAgentHealthData  // { ok, agentConnected, browserClients, agentId }
 IBridleIncomingMessage  // Hub -> Agent message (includes agentId + parts)
 IBridleOutgoingEvent    // Agent -> Hub event (includes parts)
 IBridleClientData       // { agentId, send } -- registered client metadata
@@ -218,7 +218,7 @@ BridlePartTypes         // Enum: Text, Image, File
 BridlePart              // Union type for wire parts
 
 // Data (concrete implementation)
-BridleGateway           // Hub implementation with per-bot maps
+BridleGateway           // Hub implementation with per-agent maps
 
 // Presentation
 BridleController        // HTTP endpoints (/:agentId scoped)
@@ -228,7 +228,7 @@ BridleChatWsHandler     // Browser WebSocket handler (JWT auth)
 // DTOs
 SendMessageDto          // Request body (text + parts + legacy images)
 BridleHealthDto         // Response for /api/agent/health
-BridleBotHealthDto      // Response for /api/agent/:agentId/health (includes agentId)
+BridleAgentHealthDto    // Response for /api/agent/:agentId/health (includes agentId)
 ```
 
 ## Protocol

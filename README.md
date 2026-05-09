@@ -205,7 +205,7 @@ BridleModule
 // Domain (abstract gateway + types)
 IBridleGateway          // Abstract class -- DI token
 IBridleHealthData       // { ok, agentConnected, browserClients }
-IBridleBotHealthData    // { ok, agentConnected, browserClients, agentId }
+IBridleAgentHealthData  // { ok, agentConnected, browserClients, agentId }
 IBridleIncomingMessage  // Hub -> Agent message (includes agentId + parts)
 IBridleOutgoingEvent    // Agent -> Hub event (includes parts)
 IBridleClientData       // { agentId, send } -- registered client metadata
@@ -215,7 +215,7 @@ buildParts              // Helper: text + images -> BridlePart[]
 getTextFromParts        // Helper: BridlePart[] -> string
 
 // Data (concrete implementation)
-BridleGateway           // Hub implementation with per-bot maps
+BridleGateway           // Hub implementation with per-agent maps
 
 // Presentation
 BridleController        // HTTP endpoints (/:agentId scoped)
@@ -225,7 +225,7 @@ BridleChatWsHandler     // Browser WebSocket handler (JWT auth)
 // DTOs
 SendMessageDto          // Request body (text + parts + legacy images)
 BridleHealthDto         // Response for /api/agent/health
-BridleBotHealthDto      // Response for /api/agent/:agentId/health (includes agentId)
+BridleAgentHealthDto    // Response for /api/agent/:agentId/health (includes agentId)
 ```
 
 ## Chat UI (Nuxt)

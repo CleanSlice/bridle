@@ -25,7 +25,7 @@ export abstract class IBridleTranscriptGateway {
   /**
    * Return the transcript for `(agentId, channel)` ordered oldest→newest.
    * Return `[]` when nothing has been persisted yet — never throw on a
-   * missing transcript, that's the steady state for new bots.
+   * missing transcript, that's the steady state for newly created agents.
    */
   abstract read(
     agentId: string,

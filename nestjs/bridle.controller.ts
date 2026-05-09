@@ -1,7 +1,7 @@
 import { Controller, Post, Get, Delete, Body, HttpCode, Param, Query, Req, Logger } from '@nestjs/common'
 import { ApiTags, ApiOperation, ApiBody, ApiOkResponse, ApiQuery } from '@nestjs/swagger'
 import { IBridleGateway, IBridleTranscriptGateway, buildParts } from './domain'
-import { SendMessageDto, BridleHealthDto, BridleBotHealthDto, TranscriptResponseDto } from './dtos'
+import { SendMessageDto, BridleHealthDto, BridleAgentHealthDto, TranscriptResponseDto } from './dtos'
 import { FlatResponse } from './core'
 
 @ApiTags('bridle')
@@ -14,7 +14,7 @@ export class BridleController {
     private readonly transcripts: IBridleTranscriptGateway,
   ) {}
 
-  @ApiOperation({ description: 'Send a message to a bot agent (HTTP fallback — fire & forget)', operationId: 'sendBridleMessage' })
+  @ApiOperation({ description: 'Send a message to an agent (HTTP fallback — fire & forget)', operationId: 'sendBridleMessage' })
   @ApiBody({ type: SendMessageDto })
   @FlatResponse()
   @Post(':agentId/message')
@@ -31,7 +31,7 @@ export class BridleController {
     return { ok: true }
   }
 
-  @ApiOperation({ description: 'Send a message and wait for the bot agent response (synchronous)', operationId: 'sendBridleMessageSync' })
+  @ApiOperation({ description: 'Send a message and wait for the agent response (synchronous)', operationId: 'sendBridleMessageSync' })
   @ApiBody({ type: SendMessageDto })
   @FlatResponse()
   @Post(':agentId/message/sync')
@@ -79,12 +79,12 @@ export class BridleController {
     return this.hub.health()
   }
 
-  @ApiOperation({ description: 'Check bot agent connection status', operationId: 'bridleBotHealth' })
+  @ApiOperation({ description: 'Check agent connection status', operationId: 'bridleAgentHealth' })
   @FlatResponse()
-  @ApiOkResponse({ type: BridleBotHealthDto })
+  @ApiOkResponse({ type: BridleAgentHealthDto })
   @Get(':agentId/health')
-  async botHealth(@Param('agentId') agentId: string) {
-    return this.hub.botHealth(agentId)
+  async agentHealth(@Param('agentId') agentId: string) {
+    return this.hub.agentHealth(agentId)
   }
 
   @ApiOperation({ description: 'List all connected agents', operationId: 'listAgents' })
@@ -96,7 +96,7 @@ export class BridleController {
 
   @ApiOperation({
     description:
-      'Replay the persisted chat transcript for a bot. Used to restore the chat UI on page refresh — live updates still arrive via /ws/client. Returns an empty array when nothing has been persisted yet.',
+      'Replay the persisted chat transcript for an agent. Used to restore the chat UI on page refresh — live updates still arrive via /ws/client. Returns an empty array when nothing has been persisted yet.',
     operationId: 'getBridleTranscript',
   })
   @ApiQuery({ name: 'channel', required: false, description: 'Session channel — defaults to "admin".' })
@@ -119,7 +119,7 @@ export class BridleController {
 
   @ApiOperation({
     description:
-      'Delete the persisted chat transcript for a bot/channel. Used to start a fresh chat — the UI clears, refresh shows empty. The agent runtime\'s in-memory session may still hold context until its next restart.',
+      'Delete the persisted chat transcript for an agent/channel. Used to start a fresh chat — the UI clears, refresh shows empty. The agent runtime\'s in-memory session may still hold context until its next restart.',
     operationId: 'resetBridleTranscript',
   })
   @ApiQuery({ name: 'channel', required: false, description: 'Session channel — defaults to "admin".' })

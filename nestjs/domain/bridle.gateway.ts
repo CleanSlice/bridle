@@ -1,6 +1,6 @@
 import type {
   IBridleHealthData,
-  IBridleBotHealthData,
+  IBridleAgentHealthData,
   IBridleOutgoingEvent,
   IBridleDebugEvent,
   IBridleSyncResponse,
@@ -9,7 +9,7 @@ import type {
 
 /**
  * Result of a hub-initiated sync request to an agent.
- *  - `agentOnline = false` when no agent for the bot is connected
+ *  - `agentOnline = false` when no agent is connected for this agentId
  *  - `agentOnline = true,  pushed: N` after the agent acked
  */
 export interface IBridleSyncAgentResult {
@@ -18,15 +18,15 @@ export interface IBridleSyncAgentResult {
 }
 
 /**
- * Hub gateway — manages per-bot connections from agents and browser clients.
+ * Hub gateway — manages per-agent connections from agents and browser clients.
  * Routes messages between them, scoped by agentId.
  */
 export abstract class IBridleGateway {
-  /** Send a message from a browser client to the agent for a specific bot */
+  /** Send a message from a browser client to the agent runtime for a specific agentId */
   abstract sendToAgent(clientId: string, agentId: string, text: string, parts: BridlePart[]): void
   /** Send an event to a specific browser client */
   abstract sendToClient(clientId: string, data: unknown): void
-  /** Register a browser client for a specific bot */
+  /** Register a browser client for a specific agentId */
   abstract registerClient(
     clientId: string,
     agentId: string,
@@ -35,15 +35,17 @@ export abstract class IBridleGateway {
   ): void
   /** Unregister a browser client */
   abstract unregisterClient(clientId: string): void
-  /** Register an agent connection for a specific bot */
+  /** Register an agent runtime connection for a specific agentId */
   abstract registerAgent(agentId: string, send: (data: unknown) => void): void
-  /** Unregister an agent connection for a specific bot */
+  /** Unregister an agent runtime connection for a specific agentId */
   abstract unregisterAgent(agentId: string): void
-  /** Handle an event from the agent — route to the target browser client for that bot */
+  /** Whether an agent runtime is currently registered for this agentId. */
+  abstract isAgentConnected(agentId: string): boolean
+  /** Handle an event from the agent — route to the target browser client for that agentId */
   abstract handleAgentEvent(agentId: string, data: IBridleOutgoingEvent): void
   /**
    * Handle a debug snapshot from the agent — fan out to admin clients of this
-   * bot only. Non-admin clients never see this event.
+   * agentId only. Non-admin clients never see this event.
    */
   abstract handleDebugEvent(agentId: string, data: IBridleDebugEvent): void
   /**
@@ -60,10 +62,10 @@ export abstract class IBridleGateway {
   abstract syncAgent(agentId: string, timeoutMs?: number): Promise<IBridleSyncAgentResult>
   /** Resolve a pending syncAgent() promise by requestId. */
   abstract handleSyncResponse(agentId: string, data: IBridleSyncResponse): void
-  /** Health status (all bots) */
+  /** Health status (all agents) */
   abstract health(): IBridleHealthData
-  /** Health status for a specific bot */
-  abstract botHealth(agentId: string): IBridleBotHealthData
+  /** Health status for a specific agentId */
+  abstract agentHealth(agentId: string): IBridleAgentHealthData
   /** List all connected agents with their client counts */
   abstract listAgents(): Array<{ agentId: string; clients: number }>
 }
