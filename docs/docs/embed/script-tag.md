@@ -49,10 +49,10 @@ When the SDK is loaded **from the same origin as your hub** (option B), `data-ap
 | URL | Behavior |
 |-----|----------|
 | `/sdk/latest.js` | Always tracks the latest build. Convenient, no caching guarantees. |
-| `/sdk/v1.js` | Tracks the latest **1.x** release. Safe for most production embeds. |
-| `/sdk/v1.2.3.js` | Pinned exact version. Cached forever. Use this for predictable rollouts. |
+| `/sdk/v0.js` | Tracks the latest **0.x** release. Safe for most production embeds. |
+| `/sdk/v0.4.1.js` | Pinned exact version. Cached forever. Use this for predictable rollouts. |
 
-For production sites we recommend `/sdk/v1.js` — you get patches automatically without breaking changes.
+For production sites we recommend `/sdk/v0.js` — you get patches automatically without breaking changes.
 
 ## Inline mode
 

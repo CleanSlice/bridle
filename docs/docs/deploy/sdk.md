@@ -15,9 +15,9 @@ URLs available:
 | URL | Behavior |
 |-----|----------|
 | `/sdk/latest.js` | Latest build, no caching guarantees |
-| `/sdk/v1.js` | Latest **1.x** build |
-| `/sdk/v1.0.0.js` | Pinned exact version |
-| `/sdk/latest.mjs`, `/sdk/v1.mjs`, `/sdk/v1.0.0.mjs` | ESM equivalents |
+| `/sdk/v0.js` | Latest **0.x** build |
+| `/sdk/v0.4.1.js` | Pinned exact version |
+| `/sdk/latest.mjs`, `/sdk/v0.mjs`, `/sdk/v0.4.1.mjs` | ESM equivalents |
 
 CORS is open (`Access-Control-Allow-Origin: *`) — the bundle is just JavaScript, safe to serve cross-origin.
 
@@ -29,10 +29,10 @@ This is the path embedders use by default. **No setup on your side.**
 
 ```html
 <!-- jsDelivr -->
-<script src="https://cdn.jsdelivr.net/npm/@cleanslice/bridle@1/dist/bridle.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@cleanslice/bridle@0/dist/bridle.js"></script>
 
 <!-- unpkg -->
-<script src="https://unpkg.com/@cleanslice/bridle@1/dist/bridle.js"></script>
+<script src="https://unpkg.com/@cleanslice/bridle@0/dist/bridle.js"></script>
 ```
 
 Use the `@1` tag to pin to the major version. Use `@latest` for the bleeding edge. Use `@1.0.0` for an exact pin.

@@ -46,6 +46,6 @@ Modern LLMs emit tokens one at a time. Showing a finished message after a 30-sec
 This site (`bridle.cleanslice.org`) hosts:
 
 - Documentation for embedding, deploying, and operating Bridle.
-- The SDK CDN at [`/sdk/latest.js`](https://bridle.cleanslice.org/sdk/latest.js), [`/sdk/v1.js`](https://bridle.cleanslice.org/sdk/v1.js), and pinned versions.
+- The SDK CDN at [`/sdk/latest.js`](https://bridle.cleanslice.org/sdk/latest.js), [`/sdk/v0.js`](https://bridle.cleanslice.org/sdk/v0.js), and pinned versions.
 
 You can pull the SDK from this site, from [unpkg](https://unpkg.com/@cleanslice/bridle), from [jsDelivr](https://cdn.jsdelivr.net/npm/@cleanslice/bridle), or self-host the bundle from your own hub. Pick whichever your CSP / latency / branding requirements prefer.
