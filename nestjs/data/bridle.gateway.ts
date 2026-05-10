@@ -73,10 +73,16 @@ export class BridleGateway extends IBridleGateway {
     agentId: string,
     send: (data: unknown) => void,
     isAdmin: boolean,
+    prompt?: string,
   ): void {
-    this.clients.set(clientId, { agentId, send, isAdmin })
+    this.clients.set(clientId, {
+      agentId,
+      send,
+      isAdmin,
+      ...(prompt ? { prompt } : {}),
+    })
     this.logger.log(
-      `Browser client registered: ${clientId} agentId=${agentId} admin=${isAdmin} (total: ${this.clients.size})`,
+      `Browser client registered: ${clientId} agentId=${agentId} admin=${isAdmin}${prompt ? ' +prompt' : ''} (total: ${this.clients.size})`,
     )
   }
 
@@ -99,11 +105,13 @@ export class BridleGateway extends IBridleGateway {
       return
     }
 
+    const client = this.clients.get(clientId)
     agentSend({
       type: 'message',
       clientId,
       text,
       parts,
+      ...(client?.prompt ? { prompt: client.prompt } : {}),
       messageId: randomUUID(),
     })
   }

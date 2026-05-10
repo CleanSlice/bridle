@@ -11,10 +11,40 @@ export interface IBridleClientOptions {
   token?: string | (() => string | Promise<string>)
   /** Optional channel for transcript scoping (default: 'web'). */
   channel?: string
+  /**
+   * Extra context attached at handshake time (`data-prompt` on the embed).
+   * The hub forwards it on every outgoing message to the agent so the
+   * runtime can fold it into the system prompt or treat it as session
+   * metadata. Static for the lifetime of the connection.
+   */
+  prompt?: string
 }
 
 type EventName = 'open' | 'close' | 'error' | 'typing' | 'message' | 'stream' | 'stream_end' | 'welcome'
 type Listener<T = unknown> = (payload: T) => void
+
+/**
+ * Structured connection rejection from the hub. Lets embed UIs distinguish
+ * a misconfigured integration (origin not whitelisted, missing token) from
+ * a generic transport error so they can show actionable messages.
+ *
+ * Codes mirror `bridle_error.code` on the wire:
+ *   - `MISSING_AGENT_ID`    — embed didn't pass `agentId`
+ *   - `ORIGIN_NOT_ALLOWED`  — agent is public but this origin isn't whitelisted
+ *   - `MISSING_TOKEN`       — agent is private and no JWT was provided
+ *   - `INVALID_TOKEN`       — JWT failed verification
+ */
+export class BridleAuthError extends Error {
+  readonly code: string
+  readonly details: Record<string, unknown>
+
+  constructor(code: string, details: Record<string, unknown> = {}) {
+    super(code)
+    this.name = 'BridleAuthError'
+    this.code = code
+    this.details = details
+  }
+}
 
 /**
  * Headless Bridle client. Use this directly when you want the wire-level
@@ -41,16 +71,28 @@ export class BridleClient {
         : (this.opts.token ?? '')
     const url = this.opts.apiUrl.replace(/\/$/, '')
 
+    const prompt = this.opts.prompt?.trim()
     const socket = io(`${url}/ws/client`, {
       transports: ['websocket'],
       reconnection: true,
       reconnectionDelay: 2000,
-      auth: { token, agentId: this.opts.agentId },
+      auth: {
+        token,
+        agentId: this.opts.agentId,
+        ...(prompt ? { prompt } : {}),
+      },
     })
 
     socket.on('connect', () => this.fire('open', undefined))
     socket.on('disconnect', () => this.fire('close', undefined))
     socket.on('connect_error', (err: Error) => this.fire('error', err))
+    socket.on(
+      'bridle_error',
+      (data: { code: string } & Record<string, unknown>) => {
+        const { code, ...rest } = data ?? { code: 'UNKNOWN' }
+        this.fire('error', new BridleAuthError(code ?? 'UNKNOWN', rest))
+      },
+    )
     socket.on('welcome', (data: { clientId: string }) => {
       this.clientId = data.clientId
       this.fire('welcome', data)

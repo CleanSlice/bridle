@@ -33,6 +33,13 @@ export interface IBridleInitOptions {
    */
   token?: string | (() => string | Promise<string>)
   /**
+   * Extra context attached at handshake (`data-prompt` on the embed script).
+   * The hub forwards it on every outgoing message to the agent — useful for
+   * page-specific or user-specific context the integrator wants the agent
+   * to know about (current URL, user plan, locale, etc.).
+   */
+  prompt?: string
+  /**
    * Where to mount the chat element. Defaults to <body>.
    * Accepts a CSS selector string or an HTMLElement.
    */

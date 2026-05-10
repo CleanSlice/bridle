@@ -28,6 +28,10 @@ import {
  *   2. Authenticated — JWT token + agentId in handshake auth, JWT verified.
  *      Admin role grants `clientId = "admin"` for runtime ACL.
  *
+ * Handshake auth fields:
+ *   `token`, `agentId`, optional `prompt` (integrator-supplied context that
+ *   the hub forwards on every outgoing message to the agent).
+ *
  * The default `IBridleAuthGateway` implementation always returns `null`, so
  * out of the box every connection takes path 2.
  *
@@ -43,6 +47,7 @@ import {
  *   "stream_end"    { text, messageId, ts }
  *   "typing"        { ts }
  *   "pong"          { ts }
+ *   "bridle_error"  { code, agentId?, origin? }  // emitted just before a rejected handshake disconnects, so the SDK can show a reason
  */
 @WebSocketGateway({ namespace: '/ws/client' })
 export class BridleClientWsHandler implements OnGatewayConnection, OnGatewayDisconnect {
@@ -62,57 +67,67 @@ export class BridleClientWsHandler implements OnGatewayConnection, OnGatewayDisc
       token?: string
       agentId?: string
       botId?: string
+      prompt?: string
     }
     // Accept legacy `botId` from cached pre-0.3.0 SDK bundles in the wild.
     const agentId = handshakeAuth.agentId ?? handshakeAuth.botId
+    const origin = client.handshake.headers.origin
+    const prompt = handshakeAuth.prompt?.trim() || undefined
+
+    // Emit a structured reason, then drop the connection.
+    // `disconnect(true)` forces the engine.io transport closed before the
+    // emit packet flushes, so the SDK never sees `bridle_error`. Plain
+    // `disconnect()` sends a namespace DISCONNECT packet after the queued
+    // event, preserving order on the wire.
+    const reject = (code: string, extra?: Record<string, unknown>) => {
+      client.emit('bridle_error', { code, agentId, origin, ...(extra ?? {}) })
+      client.disconnect()
+    }
 
     if (!agentId) {
       this.logger.warn('Browser connection rejected: missing agentId')
-      client.disconnect(true)
-      return
+      return reject('MISSING_AGENT_ID')
     }
 
-    const origin = client.handshake.headers.origin
     const agentAuth = await this.auth.getAgentAuth(agentId)
+    const originAllowed =
+      !!agentAuth?.isPublic &&
+      !!origin &&
+      agentAuth.allowedOrigins.includes(origin)
 
     let clientId: string
     let isAdmin = false
     let email: string | undefined
 
-    if (
-      agentAuth?.isPublic &&
-      origin &&
-      agentAuth.allowedOrigins.includes(origin)
-    ) {
+    if (originAllowed) {
       // Public flow: anonymous browser session, no token required.
       clientId = `anon-${randomId()}`
       this.logger.log(
         `Browser connected (public): clientId=${clientId} agentId=${agentId} origin=${origin}`,
       )
-    } else {
+    } else if (handshakeAuth.token) {
       // Authenticated flow: JWT required.
-      const token = handshakeAuth.token
-      if (!token) {
-        this.logger.warn(
-          `Browser connection rejected: missing token (agentId=${agentId}, origin=${origin ?? 'none'})`,
-        )
-        client.disconnect(true)
-        return
-      }
-
       let payload: Record<string, unknown>
       try {
-        payload = this.jwt.verify(token) as Record<string, unknown>
+        payload = this.jwt.verify(handshakeAuth.token) as Record<string, unknown>
       } catch {
         this.logger.warn('Browser connection rejected: invalid JWT')
-        client.disconnect(true)
-        return
+        return reject('INVALID_TOKEN')
       }
 
       const roles = payload.roles as string[] | undefined
       isAdmin = Array.isArray(roles) && roles.includes('ADMIN')
       clientId = isAdmin ? 'admin' : (payload.sub as string)
       email = payload.email as string | undefined
+    } else {
+      // No token AND public flow either disabled or origin not whitelisted.
+      // When the agent IS configured public, surface ORIGIN_NOT_ALLOWED so
+      // the embed UI can prompt the integrator to whitelist their domain.
+      const code = agentAuth?.isPublic ? 'ORIGIN_NOT_ALLOWED' : 'MISSING_TOKEN'
+      this.logger.warn(
+        `Browser connection rejected: ${code} (agentId=${agentId}, origin=${origin ?? 'none'})`,
+      )
+      return reject(code)
     }
 
     client.data = { clientId, agentId, email, isAdmin }
@@ -122,7 +137,7 @@ export class BridleClientWsHandler implements OnGatewayConnection, OnGatewayDisc
       client.emit(event, data)
     }
 
-    this.hub.registerClient(clientId, agentId, send, isAdmin)
+    this.hub.registerClient(clientId, agentId, send, isAdmin, prompt)
     client.emit('welcome', { clientId })
     // Snapshot the runtime's current online state immediately so the chat UI
     // can render the right indicator before any subsequent register/unregister

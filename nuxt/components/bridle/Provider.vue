@@ -32,7 +32,7 @@ const props = withDefaults(defineProps<{
 })
 
 const store = useBridleStore()
-const { messages, isConnected, isTyping } = storeToRefs(store)
+const { messages, isConnected, isTyping, connectionError } = storeToRefs(store)
 
 const scrollRef = ref<InstanceType<typeof ScrollArea> | null>(null)
 
@@ -107,6 +107,33 @@ async function onNewChat() {
         </div>
       </div>
     </CardHeader>
+
+    <div
+      v-if="connectionError"
+      role="alert"
+      class="border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-xs leading-relaxed text-destructive"
+    >
+      <template v-if="connectionError.code === 'ORIGIN_NOT_ALLOWED'">
+        Origin
+        <code class="rounded bg-destructive/15 px-1 py-0.5 font-mono text-[11px]">{{ (connectionError.details?.origin as string) || 'this page' }}</code>
+        isn't whitelisted for this agent. Add it in the agent's allowed origins.
+      </template>
+      <template v-else-if="connectionError.code === 'MISSING_TOKEN'">
+        Authentication required — provide a JWT for this agent.
+      </template>
+      <template v-else-if="connectionError.code === 'INVALID_TOKEN'">
+        The provided token is invalid or expired.
+      </template>
+      <template v-else-if="connectionError.code === 'MISSING_AGENT_ID'">
+        Missing <code class="rounded bg-destructive/15 px-1 py-0.5 font-mono text-[11px]">agentId</code> on the connection.
+      </template>
+      <template v-else-if="connectionError.code === 'TRANSPORT_ERROR'">
+        Can't reach the hub: {{ connectionError.message || 'transport error' }}
+      </template>
+      <template v-else>
+        {{ connectionError.message || connectionError.code || 'Connection error' }}
+      </template>
+    </div>
 
     <CardContent class="flex-1 overflow-hidden p-0">
       <ScrollArea ref="scrollRef" class="h-full">

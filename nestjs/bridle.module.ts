@@ -12,6 +12,7 @@ import {
   BridleGateway,
   BridleTranscriptNoopGateway,
   BridleAuthNoopGateway,
+  BridleAuthDemoGateway,
 } from './data'
 import { BridleApiKeyGuard } from './guards'
 
@@ -67,7 +68,22 @@ import { BridleApiKeyGuard } from './guards'
   providers: [
     { provide: IBridleGateway, useClass: BridleGateway },
     { provide: IBridleTranscriptGateway, useClass: BridleTranscriptNoopGateway },
-    { provide: IBridleAuthGateway, useClass: BridleAuthNoopGateway },
+    {
+      // Default to no-op so the production behaviour is unchanged.
+      // When `BRIDLE_DEMO_PUBLIC_ORIGINS` is set (comma-separated origin list),
+      // swap in the demo gateway — useful for the embed test rig.
+      provide: IBridleAuthGateway,
+      useFactory: (config: ConfigService) => {
+        const raw = config.get<string>('BRIDLE_DEMO_PUBLIC_ORIGINS')
+        if (!raw) return new BridleAuthNoopGateway()
+        const origins = raw
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean)
+        return new BridleAuthDemoGateway(origins)
+      },
+      inject: [ConfigService],
+    },
     BridleClientWsHandler,
     BridleAgentWsHandler,
     BridleApiKeyGuard,

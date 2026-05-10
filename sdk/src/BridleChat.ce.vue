@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, watch, nextTick, useHost } from 'vue'
-import { BridleClient } from './client'
+import { BridleClient, BridleAuthError } from './client'
 import type { IBridleMessage } from './types'
 
 const props = withDefaults(
@@ -20,6 +20,11 @@ const props = withDefaults(
      * `prefers-color-scheme`); `light`/`dark` force one regardless.
      */
     colorMode?: 'auto' | 'light' | 'dark'
+    /**
+     * Integrator-supplied context forwarded with every message (page URL,
+     * user plan, etc.). Sent once at handshake.
+     */
+    prompt?: string
   }>(),
   {
     title: 'Agent Chat',
@@ -42,6 +47,7 @@ const emit = defineEmits<{
 const messages = ref<IBridleMessage[]>([])
 const isConnected = ref(false)
 const isTyping = ref(false)
+const connectionError = ref<BridleAuthError | Error | null>(null)
 const isOpen = ref(props.mode === 'inline' || coerceBool(props.defaultOpen))
 const draft = ref('')
 const scrollEl = ref<HTMLElement | null>(null)
@@ -119,6 +125,7 @@ function buildClient(): BridleClient {
     apiUrl: props.apiUrl,
     agentId: props.agentId,
     token: props.token,
+    prompt: props.prompt,
   })
 }
 
@@ -127,12 +134,14 @@ async function connect(): Promise<void> {
   client = buildClient()
   client.on('open', () => {
     isConnected.value = true
+    connectionError.value = null
     emit('ready')
   })
   client.on('close', () => {
     isConnected.value = false
   })
   client.on('error', (err) => {
+    connectionError.value = err
     emit('error', err)
   })
   client.on('typing', () => {
@@ -204,10 +213,10 @@ watch(
   { deep: true },
 )
 
-// Reconnect when bot/token/api changes — useful for dynamic dashboards.
+// Reconnect when bot/token/api/prompt changes — useful for dynamic dashboards.
 // Token may be empty for public bots (auth via Origin whitelist).
 watch(
-  () => [props.apiUrl, props.agentId, props.token],
+  () => [props.apiUrl, props.agentId, props.token, props.prompt],
   () => {
     if (!props.apiUrl || !props.agentId) return
     messages.value = []
@@ -290,6 +299,30 @@ defineExpose({
         >×</button>
       </header>
 
+      <div
+        v-if="connectionError"
+        class="bridle__banner bridle__banner--error"
+        role="alert"
+      >
+        <template v-if="(connectionError as BridleAuthError).code === 'ORIGIN_NOT_ALLOWED'">
+          Origin
+          <code>{{ (connectionError as BridleAuthError).details?.origin || 'this page' }}</code>
+          isn't whitelisted for this agent. Add it in the agent's allowed origins.
+        </template>
+        <template v-else-if="(connectionError as BridleAuthError).code === 'MISSING_TOKEN'">
+          Authentication required — provide a JWT via <code>data-token</code>.
+        </template>
+        <template v-else-if="(connectionError as BridleAuthError).code === 'INVALID_TOKEN'">
+          The provided token is invalid or expired.
+        </template>
+        <template v-else-if="(connectionError as BridleAuthError).code === 'MISSING_AGENT_ID'">
+          Missing <code>agent-id</code> on the embed script.
+        </template>
+        <template v-else>
+          {{ connectionError.message || 'Connection error' }}
+        </template>
+      </div>
+
       <div ref="scrollEl" class="bridle__messages">
         <div v-if="messages.length === 0" class="bridle__empty">
           Start a conversation
@@ -357,6 +390,9 @@ defineExpose({
   --bridle-user-fg: var(--bridle-primary-fg);
   --bridle-border: #e5e7eb;
   --bridle-focus-ring: color-mix(in srgb, var(--bridle-primary) 20%, transparent);
+  --bridle-error-bg: #fee2e2;
+  --bridle-error-fg: #991b1b;
+  --bridle-error-border: #fca5a5;
   color-scheme: light;
 }
 
@@ -369,6 +405,9 @@ defineExpose({
   --bridle-muted: #94a3b8;
   --bridle-bubble-bg: #1e293b;
   --bridle-border: #334155;
+  --bridle-error-bg: rgba(248, 113, 113, 0.14);
+  --bridle-error-fg: #fecaca;
+  --bridle-error-border: rgba(248, 113, 113, 0.32);
   color-scheme: dark;
 }
 
@@ -498,6 +537,26 @@ defineExpose({
   border-radius: 4px;
 }
 .bridle__close:hover { background: var(--bridle-bubble-bg); }
+
+.bridle__banner {
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--bridle-border);
+  flex-shrink: 0;
+}
+.bridle__banner--error {
+  background: var(--bridle-error-bg);
+  color: var(--bridle-error-fg);
+  border-bottom-color: var(--bridle-error-border);
+}
+.bridle__banner code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+  background: rgba(0, 0, 0, 0.06);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 11px;
+}
 
 .bridle__messages {
   flex: 1;

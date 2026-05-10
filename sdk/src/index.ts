@@ -2,7 +2,7 @@ import { defineCustomElement } from 'vue'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — Vite resolves .ce.vue, tsc dts pass doesn't know about it
 import BridleChat from './BridleChat.ce.vue'
-import { BridleClient } from './client'
+import { BridleClient, BridleAuthError } from './client'
 import type { IBridleInitOptions, IBridleInstance, IBridleMessage } from './types'
 
 // Capture the script tag synchronously at module load — `document.currentScript`
@@ -76,6 +76,7 @@ function init(opts: IBridleInitOptions): IBridleInstance {
   if (opts.placeholder) el.setAttribute('placeholder', opts.placeholder)
   if (opts.theme) el.setAttribute('theme', opts.theme)
   if (opts.colorMode) el.setAttribute('color-mode', opts.colorMode)
+  if (opts.prompt) el.setAttribute('prompt', opts.prompt)
 
   applyThemeVars(el, opts.themeVars)
 
@@ -149,6 +150,7 @@ function autoMount(): void {
     placeholder: ds.placeholder,
     theme: ds.theme as 'default' | 'cleanslice' | undefined,
     colorMode: ds.colorMode as 'auto' | 'light' | 'dark' | undefined,
+    prompt: ds.prompt,
   })
 }
 
@@ -174,7 +176,7 @@ if (typeof window !== 'undefined') {
   }
 }
 
-export { init, BridleClient }
+export { init, BridleClient, BridleAuthError }
 export type {
   BridlePart,
   IBridleMessage,

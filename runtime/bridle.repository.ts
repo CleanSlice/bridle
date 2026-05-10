@@ -48,6 +48,13 @@ export interface IBridleMessageData {
   channel: string
   ts: number
   metadata?: Record<string, unknown>
+  /**
+   * Integrator-supplied context attached to the embed (`data-prompt` on the
+   * `<script>` tag). Present on every message in this session when the
+   * embed page set it. Fold this into the system prompt — it lets the
+   * integrator give the agent page/user/tenant context without code changes.
+   */
+  prompt?: string
 }
 
 // ── Admin protocol — debug + sync ─────────────────────────────
@@ -93,7 +100,7 @@ export type DebugToggleHandler = (enabled: boolean) => void
  * Flow:  Browser ↔ /ws/client ↔ Bridle Hub ↔ /ws/agent ↔ Agent (this)
  *
  * Events (Hub → Agent):
- *   "message"  { clientId, text, parts, messageId }
+ *   "message"  { clientId, text, parts, messageId, prompt? }
  *   "pong"     {}
  *
  * Events (Agent → Hub):
@@ -263,6 +270,7 @@ export class BridleRepository implements IChannelGateway {
 
       const text = (msg.text as string) ?? ''
       const parts = (msg.parts as BridlePart[]) ?? (text ? [{ type: BridlePartTypes.Text, text }] : [])
+      const prompt = typeof msg.prompt === 'string' ? msg.prompt : undefined
 
       this.handler({
         id: (msg.messageId as string) ?? randomUUID(),
@@ -272,6 +280,7 @@ export class BridleRepository implements IChannelGateway {
         channel: 'bridle',
         ts: Date.now(),
         metadata: { clientId: msg.clientId, source: 'bridle' },
+        ...(prompt ? { prompt } : {}),
       }).catch(err => console.error('[bridle] handler error:', err))
     })
 

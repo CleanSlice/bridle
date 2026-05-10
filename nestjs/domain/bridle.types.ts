@@ -36,6 +36,13 @@ export interface IBridleIncomingMessage {
   text: string
   messageId: string
   parts: BridlePart[]
+  /**
+   * Optional integrator-supplied context attached at handshake time
+   * (`data-prompt` on the embed script). The hub forwards it on every message
+   * to the agent so the runtime can fold it into the system prompt or treat
+   * it as session metadata. Empty/unset = no extra context.
+   */
+  prompt?: string
 }
 
 /** Agent → Hub: events routed to browser clients */
@@ -138,6 +145,11 @@ export interface IBridleClientData {
    * events (debug snapshots) in addition to normal messages.
    */
   isAdmin: boolean
+  /**
+   * Integrator-supplied context (from `data-prompt`) attached on registration.
+   * Forwarded on every outgoing message to the agent.
+   */
+  prompt?: string
 }
 
 // ── Helpers ──────────────────────────────────────────────────

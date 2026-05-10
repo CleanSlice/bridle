@@ -36,6 +36,12 @@ export interface IBridleMessageData {
   streaming?: boolean
 }
 
+export interface IBridleConnectionError {
+  code: string
+  message?: string
+  details?: Record<string, unknown>
+}
+
 function buildParts(text: string, images?: Array<{ base64: string; mediaType: string }>): BridlePart[] {
   const parts: BridlePart[] = []
   if (text) parts.push({ type: BridlePartTypes.Text, text })
@@ -65,6 +71,7 @@ export const useBridleStore = defineStore('bridle', {
     isTyping: false,
     isOpen: false,
     clientId: null as string | null,
+    connectionError: null as IBridleConnectionError | null,
     _socket: null as Socket | null,
   }),
 
@@ -86,6 +93,7 @@ export const useBridleStore = defineStore('bridle', {
 
       socket.on('connect', () => {
         this.isConnected = true
+        this.connectionError = null
       })
 
       socket.on('disconnect', () => {
@@ -94,7 +102,15 @@ export const useBridleStore = defineStore('bridle', {
 
       socket.on('connect_error', (err) => {
         this.isConnected = false
+        this.connectionError = { code: 'TRANSPORT_ERROR', message: err.message }
         console.error('[bridle] connection error:', err.message)
+      })
+
+      // Hub rejects bad handshakes (origin not whitelisted, missing/invalid
+      // token, …) by emitting a structured reason just before disconnect.
+      socket.on('bridle_error', (data: { code?: string } & Record<string, unknown>) => {
+        const { code, ...details } = data ?? {}
+        this.connectionError = { code: code ?? 'UNKNOWN', details }
       })
 
       socket.on('welcome', (data: { clientId: string }) => {
@@ -167,6 +183,7 @@ export const useBridleStore = defineStore('bridle', {
       this._socket?.disconnect()
       this._socket = null
       this.isConnected = false
+      this.connectionError = null
     },
 
     sendMessage(text: string, images?: Array<{ base64: string; mediaType: string }>) {
