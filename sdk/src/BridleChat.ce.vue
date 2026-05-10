@@ -1,7 +1,45 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, watch, nextTick, useHost } from 'vue'
+import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 import { BridleClient, BridleAuthError } from './client'
 import type { IBridleMessage } from './types'
+
+// One-time DOMPurify hook: route agent-supplied links through a new tab so a
+// rogue href never navigates the host page out from under the embed.
+let purifyInitialized = false
+function initPurify(): void {
+  if (purifyInitialized) return
+  purifyInitialized = true
+  DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+    if ((node as Element).tagName === 'A') {
+      const a = node as HTMLAnchorElement
+      a.setAttribute('target', '_blank')
+      a.setAttribute('rel', 'noopener noreferrer')
+    }
+  })
+}
+
+const MARKDOWN_ALLOWED_TAGS = [
+  'p', 'br', 'strong', 'em', 'del', 's', 'code', 'pre',
+  'a', 'ul', 'ol', 'li', 'blockquote',
+  'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr',
+  'table', 'thead', 'tbody', 'tr', 'th', 'td',
+]
+
+function renderMarkdown(text: string): string {
+  if (!text) return ''
+  initPurify()
+  const html = marked.parse(text, {
+    gfm: true,
+    breaks: true,
+    async: false,
+  }) as string
+  return DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: MARKDOWN_ALLOWED_TAGS,
+    ALLOWED_ATTR: ['href', 'title'],
+  })
+}
 
 const props = withDefaults(
   defineProps<{
@@ -332,7 +370,12 @@ defineExpose({
           :key="m.id"
           :class="['bridle__msg', `bridle__msg--${m.role}`]"
         >
-          <div class="bridle__bubble">{{ m.text }}</div>
+          <div
+            v-if="m.role === 'assistant'"
+            class="bridle__bubble bridle__bubble--md"
+            v-html="renderMarkdown(m.text)"
+          />
+          <div v-else class="bridle__bubble">{{ m.text }}</div>
         </div>
         <div v-if="isTyping" class="bridle__typing" aria-label="Agent is typing">
           <span /><span /><span />
@@ -588,6 +631,11 @@ defineExpose({
   white-space: pre-wrap;
   word-break: break-word;
 }
+/* Markdown-rendered bubbles use HTML elements for layout — disable pre-wrap
+   so newlines from <br> don't double up. word-break stays for long URLs. */
+.bridle__bubble--md {
+  white-space: normal;
+}
 .bridle__msg--user .bridle__bubble {
   background: var(--bridle-user-bg);
   color: var(--bridle-user-fg);
@@ -595,6 +643,99 @@ defineExpose({
 }
 .bridle__msg--assistant .bridle__bubble {
   border-bottom-left-radius: 4px;
+}
+
+/* ---- Markdown typography (assistant bubbles) ----
+   :where() keeps specificity at 0 so theme overrides don't have to fight. */
+.bridle__bubble--md :where(p) {
+  margin: 0;
+}
+.bridle__bubble--md :where(p + p),
+.bridle__bubble--md :where(p + ul),
+.bridle__bubble--md :where(p + ol),
+.bridle__bubble--md :where(ul + p),
+.bridle__bubble--md :where(ol + p),
+.bridle__bubble--md :where(p + pre),
+.bridle__bubble--md :where(pre + p),
+.bridle__bubble--md :where(p + blockquote),
+.bridle__bubble--md :where(blockquote + p),
+.bridle__bubble--md :where(p + h1),
+.bridle__bubble--md :where(p + h2),
+.bridle__bubble--md :where(p + h3) {
+  margin-top: 8px;
+}
+.bridle__bubble--md :where(strong) { font-weight: 600; }
+.bridle__bubble--md :where(em) { font-style: italic; }
+.bridle__bubble--md :where(del, s) { text-decoration: line-through; }
+.bridle__bubble--md :where(a) {
+  color: var(--bridle-primary);
+  text-decoration: underline;
+  word-break: break-word;
+}
+.bridle__bubble--md :where(code) {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.92em;
+  background: rgba(0, 0, 0, 0.06);
+  padding: 1px 5px;
+  border-radius: 4px;
+  word-break: break-word;
+}
+.bridle__bubble--md :where(pre) {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 8px;
+  overflow-x: auto;
+  font-size: 0.92em;
+  line-height: 1.4;
+}
+.bridle__bubble--md :where(pre code) {
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  font-size: inherit;
+}
+.bridle__bubble--md :where(ul, ol) {
+  margin: 4px 0 0;
+  padding-left: 22px;
+}
+.bridle__bubble--md :where(li) {
+  margin: 2px 0;
+}
+.bridle__bubble--md :where(blockquote) {
+  margin: 6px 0;
+  padding-left: 10px;
+  border-left: 3px solid var(--bridle-border);
+  color: var(--bridle-muted);
+}
+.bridle__bubble--md :where(h1, h2, h3, h4, h5, h6) {
+  margin: 8px 0 4px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.bridle__bubble--md :where(h1) { font-size: 1.15em; }
+.bridle__bubble--md :where(h2) { font-size: 1.10em; }
+.bridle__bubble--md :where(h3) { font-size: 1.05em; }
+.bridle__bubble--md :where(h4, h5, h6) { font-size: 1em; }
+.bridle__bubble--md :where(hr) {
+  margin: 10px 0;
+  border: 0;
+  border-top: 1px solid var(--bridle-border);
+}
+.bridle__bubble--md :where(table) {
+  border-collapse: collapse;
+  margin: 6px 0;
+  font-size: 0.95em;
+}
+.bridle__bubble--md :where(th, td) {
+  border: 1px solid var(--bridle-border);
+  padding: 4px 8px;
+}
+/* In dark mode, the rgba(0,0,0,…) backgrounds for code disappear into the
+   dark bubble. Brighten them so code blocks stay distinguishable. */
+:host([data-color-mode="dark"]) .bridle__bubble--md :where(code),
+:host([data-color-mode="dark"]) .bridle__bubble--md :where(pre) {
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .bridle__typing {

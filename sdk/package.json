@@ -1,6 +1,6 @@
 {
   "name": "@cleanslice/bridle",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Embeddable web chat for Bridle — drop-in <script> or programmatic init.",
   "type": "module",
   "main": "./dist/bridle.mjs",
@@ -31,10 +31,13 @@
     "typecheck": "vue-tsc --noEmit"
   },
   "dependencies": {
+    "dompurify": "^3.2.0",
+    "marked": "^15.0.0",
     "socket.io-client": "^4.7.5",
     "vue": "^3.5.0"
   },
   "devDependencies": {
+    "@types/dompurify": "^3.2.0",
     "@vitejs/plugin-vue": "^5.0.0",
     "typescript": "^5.4.0",
     "vite": "^5.4.0",
