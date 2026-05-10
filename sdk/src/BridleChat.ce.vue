@@ -89,6 +89,7 @@ const connectionError = ref<BridleAuthError | Error | null>(null)
 const isOpen = ref(props.mode === 'inline' || coerceBool(props.defaultOpen))
 const draft = ref('')
 const scrollEl = ref<HTMLElement | null>(null)
+const inputEl = ref<HTMLTextAreaElement | null>(null)
 
 let client: BridleClient | null = null
 
@@ -214,6 +215,10 @@ function send(): void {
   isTyping.value = true
   client.send(text)
   draft.value = ''
+  // autoSize() set an inline height on growth; clearing the value alone
+  // leaves the textarea tall and empty. Drop the inline style so it falls
+  // back to the rows="1" baseline.
+  if (inputEl.value) inputEl.value.style.height = ''
 }
 
 function randomId(): string {
@@ -384,6 +389,7 @@ defineExpose({
 
       <form class="bridle__input" @submit.prevent="send">
         <textarea
+          ref="inputEl"
           v-model="draft"
           :placeholder="placeholder"
           :disabled="!isConnected"
