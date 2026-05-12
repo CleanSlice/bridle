@@ -58,7 +58,17 @@ const token = jwt.sign(
 )
 ```
 
-Use a short expiry — the SDK reconnects automatically and your token-getter function (`token: () => fetchJwt()`) will be called again on reconnect, so refresh is transparent.
+### Token lifetime
+
+Pick the shortest expiry your refresh story tolerates. The SDK reconnects automatically and accepts a token-getter (`token: () => fetchJwt()`) which gets called again on every (re)connect — that's the path designed for short tokens. Long pinned tokens skip refresh entirely but leak more credential window if the page is copy-pasted into a hostile context.
+
+| Expiry | When it's right | What to watch |
+|--------|-----------------|---------------|
+| `15m`–`1h` | Default for production embeds. Pairs with a refresh endpoint. | Page sitting open past the expiry without reconnecting silently breaks the chat. Use the token-getter form so reconnects refetch. |
+| `24h`–`7d` | Dev demos, internal dashboards, kiosks. | If `data-token` is rendered into HTML, anyone who scrapes the page gets the JWT until it expires. Don't ship to public pages. |
+| `30d`+ | Avoid for end-user embeds. | Effectively a long-lived bearer credential. Treat as a secret. |
+
+Some hubs (notably the [Ranch hub](https://docs.cleanslice.org/ranch)) ship a `POST /auth/embed/token` endpoint that mints these JWTs for you, gated by a server-side API key with an `embed:mint` scope. The endpoint accepts an optional `expiresIn` field on the request body (`<n>(s|m|h|d)`, default `15m`) so the same backend serves both short-lived production embeds and long-lived dev iframes.
 
 ## Admin clients
 
