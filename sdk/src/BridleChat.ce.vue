@@ -183,6 +183,13 @@ async function connect(): Promise<void> {
     connectionError.value = err
     emit('error', err)
   })
+  client.on('welcome', ({ clientId }) => {
+    // Hub assigns clientId from JWT sub (or 'admin' for admin tokens) and
+    // the runtime persists the transcript at `bridle:<clientId>.jsonl`.
+    // Replay it so the chat survives a page refresh — live messages keep
+    // flowing through the socket while this fetch runs.
+    void loadTranscript(clientId)
+  })
   client.on('typing', () => {
     isTyping.value = true
   })
@@ -200,6 +207,49 @@ async function connect(): Promise<void> {
     emit('message', m)
   })
   await client.connect()
+}
+
+async function loadTranscript(channel: string): Promise<void> {
+  if (!channel) return
+  try {
+    const url =
+      `${props.apiUrl.replace(/\/$/, '')}` +
+      `/api/agent/${encodeURIComponent(props.agentId)}/transcript` +
+      `?channel=${encodeURIComponent(channel)}`
+    const headers: Record<string, string> = {}
+    if (props.token) headers.Authorization = `Bearer ${props.token}`
+    const res = await fetch(url, { headers })
+    if (!res.ok) return
+    type ApiMessage = {
+      id: string
+      role: 'user' | 'assistant'
+      text: string
+      ts: number
+    }
+    const body = (await res.json()) as
+      | { messages?: ApiMessage[]; data?: { messages?: ApiMessage[] } }
+      | null
+    const items: ApiMessage[] = body?.data?.messages ?? body?.messages ?? []
+    if (items.length === 0) return
+    // Merge transcript with whatever is already on screen — live wins on
+    // id collisions (the agent may have already re-sent a tail message
+    // by the time this fetch resolves). Order by `ts` so insertion is
+    // visually correct.
+    const map = new Map<string, IBridleMessage>()
+    for (const m of items) {
+      map.set(m.id, {
+        id: m.id,
+        role: m.role,
+        text: m.text,
+        parts: [{ type: 'text', text: m.text }],
+        ts: m.ts,
+      })
+    }
+    for (const m of messages.value) map.set(m.id, m)
+    messages.value = Array.from(map.values()).sort((a, b) => a.ts - b.ts)
+  } catch (err) {
+    console.warn('[bridle] transcript load failed:', err)
+  }
 }
 
 function send(): void {
