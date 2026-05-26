@@ -1,0 +1,9 @@
+{
+  "name": "@cleanslice/bridle-example",
+  "private": true,
+  "description": "Minimal embed example: serves the local SDK build and mints embed JWTs against a Ranch hub.",
+  "type": "module",
+  "scripts": {
+    "dev": "node server.js"
+  }
+}

@@ -67,6 +67,7 @@ Read the bridle README.md and docs/PROTOCOL.md for full auth details, parts form
 | `sdk/` | Embed SDK — Web Component for any website | Vue 3 (compiled), socket.io-client |
 | `runtime/` | Agent client — connects to the hub as a channel | socket.io-client |
 | `docs/` | Documentation site (VitePress) — published at [bridle.cleanslice.org](https://bridle.cleanslice.org) | VitePress |
+| `example/` | Minimal embed example — Node server + HTML page that exercises the local SDK build against a Ranch hub | Node (no deps) |
 
 ## Embed in any site (drop-in)
 
@@ -80,6 +81,24 @@ Read the bridle README.md and docs/PROTOCOL.md for full auth details, parts form
 ```
 
 Full embed guide: [bridle.cleanslice.org/embed/script-tag](https://bridle.cleanslice.org/embed/script-tag).
+
+## Try it locally (`example/`)
+
+The [`example/`](./example) directory is a zero-dependency Node server + HTML page that:
+
+- Mints embed JWTs server-side by calling `POST /auth/embed/token` on a Ranch hub (so `RANCH_API_KEY` stays out of the browser).
+- Serves the **freshly built** SDK from `sdk/dist`, so you can iterate on the SDK and refresh to see changes.
+
+Prerequisites: a running Ranch deployment, an agent created in Ranch, and an agent runtime connected to that agent so the chat has someone to talk to.
+
+```bash
+cd sdk && npm install && npm run build       # one-time
+cd ../example
+cp .env.example .env                          # then fill in RANCH_API_KEY + BRIDLE_AGENT_ID
+npm run dev                                   # http://localhost:8787
+```
+
+See [example/README.md](./example/README.md) for the full setup, the auth flow diagram, and troubleshooting.
 
 ## Message Parts
 

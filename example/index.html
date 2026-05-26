@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Bridle embed — example</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 24px; }
+      .hint { font-size: 13px; color: #555; max-width: 480px; }
+      code { background: #f3f4f6; padding: 1px 5px; border-radius: 3px; }
+      #status { font-size: 12px; color: #888; }
+      #status.error { color: #b91c1c; }
+    </style>
+  </head>
+  <body>
+    <p class="hint">
+      The token, hub URL, and agent id all come from this page's backend
+      (<code>GET /embed/token</code>), which calls
+      <code>POST /auth/embed/token</code> on the Ranch hub using
+      <code>RANCH_API_KEY</code> — the key never reaches the browser.
+    </p>
+    <p id="status">Minting token…</p>
+
+    <div id="bridle-chat" style="height: 600px; max-width: 480px;"></div>
+
+    <script>
+      // Mint the JWT on our backend first, then drop the canonical bridle
+      // script tag with `data-token`. The SDK auto-mounts from the script's
+      // dataset — same shape as the production embed snippet, with the
+      // raw API key staying server-side.
+      (async () => {
+        const status = document.getElementById('status');
+        try {
+          const res = await fetch('/embed/token?sub=user-123&email=alice@example.com');
+          if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            throw new Error(body.error || `token endpoint ${res.status}`);
+          }
+          const { token, apiUrl, agentId } = await res.json();
+
+          const script = document.createElement('script');
+          script.src = '/sdk/latest.js';
+          script.dataset.apiUrl = apiUrl;
+          script.dataset.agentId = agentId;
+          script.dataset.mode = 'inline';
+          script.dataset.mount = '#bridle-chat';
+          script.dataset.token = token;
+          // Demo of the customCss option (v0.8.0): inject CSS straight into
+          // the SDK's shadow root to restyle internal classes that CSS
+          // variables can't reach. Remove this block for the stock look.
+          script.dataset.customCss = `
+            .bridle__panel {
+              border-radius: 5px;
+              box-shadow: 0px 2px 6px #00000029;
+              border: 1px solid #C5D5FF;
+            }
+          `;
+          script.onload = () => status.remove();
+          script.onerror = () => {
+            status.classList.add('error');
+            status.textContent = 'Failed to load bridle SDK';
+          };
+          document.body.appendChild(script);
+        } catch (err) {
+          status.classList.add('error');
+          status.textContent = `Failed to start bridle: ${err.message}`;
+          console.error(err);
+        }
+      })();
+    </script>
+  </body>
+</html>
