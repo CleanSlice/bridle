@@ -21,6 +21,10 @@ The container's size defines the chat's size:
 <div id="chat-inline" style="height: 520px"></div>
 ```
 
+## Live demo
+
+<BridleEmbed title="Support chat" />
+
 ## What changes vs. floating
 
 | Option | Floating (default) | Inline |

@@ -22,6 +22,12 @@ Bridle.init({
 })
 ```
 
+## Live demo
+
+<BridleEmbed title="Auth via token()" />
+
+> The hosted demo agent is public (origin-whitelisted on the hub), so no JWT is required here. In your own integration the `token()` function would mint a fresh JWT server-side on every connect.
+
 ## Token forms
 
 | `token` value | When used |

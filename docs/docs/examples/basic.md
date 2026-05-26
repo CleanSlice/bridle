@@ -23,6 +23,10 @@ The shortest possible integration: one `<script>` tag with `data-*` attributes. 
 | Connection | WebSocket opened to `apiUrl/ws/client` with the JWT |
 | UI | Floating FAB renders bottom-right; click to open the panel |
 
+## Live demo
+
+<BridleEmbed title="Basic demo" />
+
 ## When to use it
 
 - Static sites — WordPress, Webflow, Shopify, plain HTML.

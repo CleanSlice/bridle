@@ -32,6 +32,16 @@ Bridle.init({
 })
 ```
 
+## Live demo
+
+<BridleEmbed
+  title="Helper"
+  theme="cleanslice"
+  color-mode="light"
+  :theme-vars="{ '--bridle-primary': '#6366f1', '--bridle-radius': '14px' }"
+  custom-css=".bridle__panel { border: 1px solid #c7d2fe; box-shadow: 0 8px 24px rgba(99, 102, 241, 0.18); border-radius: 14px; }"
+/>
+
 ## How they layer
 
 | Layer | Reaches | Use when |
