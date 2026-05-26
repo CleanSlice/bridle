@@ -3,14 +3,14 @@
 The Bridle protocol is what flows on the wire between browsers, the hub, and agents. It's a thin Socket.IO-based layer with a JSON message format.
 
 ```
-     Browser (any site)         Bridle Hub (NestJS)         Agent Runtime
-        |                            |                         |
-        |--- /ws/client -----------> |                         |
-        |    auth: { token,          |--- /ws/agent ---------> |
-        |            agentId }       |    auth: { apiKey,      |
-        |                            |            agentId }    |
-        |<--- stream/message ------- |<--- stream/message ---- |
-        |     { text, parts[] }      |     { text, parts[] }   |
+    Browser (any site)         Bridle Hub (NestJS)         Agent Runtime
+        |                            |                           |
+        |--- /ws/client -----------> |                           |
+        | auth: { token,  agentId }  |--- /ws/agent -----------> |
+        |                            | auth: { apiKey, agentId } |
+        |                            |                           |
+        |<--- stream/message ------- |<--- stream/message ------ |
+        |     { text, parts[] }      |     { text, parts[] }     |
 ```
 
 ## Two namespaces

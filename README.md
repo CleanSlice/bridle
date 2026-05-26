@@ -9,13 +9,14 @@ Webchat relay for AI agents. Bridle connects browser users to an agent runtime t
 [Protocol Spec](./docs/PROTOCOL.md) · [Hub (NestJS)](./nestjs/README.md) · [Nuxt Layer](./nuxt/README.md) · [Embed SDK](./sdk/README.md) · [Agent Runtime](./runtime/README.md)
 
 ```
-Browser (Nuxt)               Bridle Hub (NestJS)           Agent Runtime
-     |                             |                             |
-     |--- /ws/client --------------->|                             |
-     |   auth: { token, agentId }    |--- /ws/agent -------------->|
-     |                             |   auth: { apiKey, agentId }   |
-     |<--- stream/message ---------|<--- stream/message ---------|
-     |   { text, parts[] }         |   { text, parts[] }         |
+    Browser (any site)         Bridle Hub (NestJS)         Agent Runtime
+        |                            |                           |
+        |--- /ws/client -----------> |                           |
+        | auth: { token,  agentId }  |--- /ws/agent -----------> |
+        |                            | auth: { apiKey, agentId } |
+        |                            |                           |
+        |<--- stream/message ------- |<--- stream/message ------ |
+        |     { text, parts[] }      |     { text, parts[] }     |
 ```
 
 The hub is **stateless** -- it holds no message history. It routes messages between browsers and agents in real time using Socket.IO. Multiple bots can connect simultaneously, each scoped by `agentId`. All messages carry rich `parts[]` (text, images, files) alongside a plain `text` shorthand.
