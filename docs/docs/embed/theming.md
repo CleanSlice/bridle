@@ -56,7 +56,78 @@ These set `style="..."` on the `<bridle-chat>` element, so they win over externa
 
 ## Override via `data-*` (script tag)
 
-Not directly. Theme via CSS or programmatic `init()`. The drop-in script intentionally keeps `data-*` minimal.
+Drop-in embeds can ship overrides via two attributes:
+
+```html
+<script
+  src="https://bridle.cleanslice.org/sdk/latest.js"
+  data-agent-id="agent-abc-123"
+  data-stylesheet="/css/bridle-overrides.css"
+></script>
+```
+
+| Attribute | Description |
+|-----------|-------------|
+| `data-custom-css` | Inline CSS string injected into the shadow root |
+| `data-stylesheet` | One URL, or several comma-separated URLs, loaded as `<link rel="stylesheet">` inside the shadow root |
+
+See [Overriding internal classes](#overriding-internal-classes) below for what these unlock.
+
+## Overriding internal classes
+
+CSS variables cover the design tokens (colors, radius, shadow, font). To restyle the actual class rules — `.bridle__panel`, `.bridle__bubble`, `.bridle__header`, etc. — you need to inject CSS **inside** the shadow root. Host-page CSS can't reach those selectors.
+
+`init()` accepts two options:
+
+```ts
+init({
+  apiUrl,
+  agentId,
+  token,
+  // Inline CSS — appended as <style> inside the shadow root.
+  customCss: `
+    .bridle__panel {
+      border-radius: 5px;
+      box-shadow: 0 2px 6px #00000029;
+      border: 1px solid #C5D5FF;
+    }
+    .bridle__bubble {
+      font-size: 13px;
+    }
+  `,
+  // External file(s) — appended as <link rel="stylesheet"> inside the shadow root.
+  stylesheets: ['/css/bridle-overrides.css'],
+})
+```
+
+Drop-in equivalent:
+
+```html
+<script
+  src="https://bridle.cleanslice.org/sdk/latest.js"
+  data-agent-id="agent-abc-123"
+  data-stylesheet="/css/bridle-overrides.css, /css/bridle-typography.css"
+></script>
+```
+
+Cascade order: your overrides are appended **after** the component's own `<style>`, so equal-specificity rules win without `!important`.
+
+### Internal classes you can target
+
+| Class | What it is |
+|-------|------------|
+| `.bridle__panel` | The chat panel (floating window or inline container) |
+| `.bridle__header` | Header row with title and close button |
+| `.bridle__messages` | Scrollable message list |
+| `.bridle__bubble` | A single message bubble (assistant or user) |
+| `.bridle__bubble--md` | Assistant bubble with rendered Markdown |
+| `.bridle__msg--user` / `.bridle__msg--assistant` | Bubble wrapper per role |
+| `.bridle__input` | Footer composer (textarea + send button) |
+| `.bridle__fab` | Floating action button (floating mode only) |
+| `.bridle__typing` | Three-dot typing indicator |
+| `.bridle__banner--error` | Connection-error banner |
+
+These class names are part of the SDK's public surface — they won't be renamed without a major-version bump.
 
 ## Match a specific brand
 

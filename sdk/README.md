@@ -26,6 +26,8 @@ The script auto-mounts a floating chat bubble in the bottom-right corner. If the
 | `data-mount` | `<body>` | CSS selector for inline mode |
 | `data-title` | `Agent Chat` | Header text |
 | `data-placeholder` | `Type a message...` | Input placeholder |
+| `data-custom-css` | optional | Inline CSS injected into the shadow root |
+| `data-stylesheet` | optional | Stylesheet URL(s) loaded into the shadow root (comma-separate for multiple) |
 
 ## Programmatic init
 
@@ -89,6 +91,37 @@ bridle-chat {
 ```
 
 The element uses Shadow DOM, so host page styles never bleed in and component styles never bleed out.
+
+### Restyling internal elements
+
+`themeVars` covers the design tokens (colors, radius, shadow, etc.). To override the actual class rules (`.bridle__panel`, `.bridle__bubble`, ...), inject your own CSS into the shadow root via `customCss` or `stylesheets`:
+
+```js
+init({
+  apiUrl: '…',
+  agentId: '…',
+  customCss: `
+    .bridle__panel {
+      border-radius: 5px;
+      box-shadow: 0 2px 6px #00000029;
+      border: 1px solid #C5D5FF;
+    }
+  `,
+  stylesheets: ['/css/bridle-overrides.css'],
+})
+```
+
+Drop-in equivalent:
+
+```html
+<script
+  src="https://bridle.cleanslice.org/sdk/latest.js"
+  data-agent-id="agent-abc-123"
+  data-stylesheet="/css/bridle-overrides.css"
+></script>
+```
+
+Both append `<style>` / `<link>` tags inside the shadow root, so cascade order puts your overrides after the component's own rules.
 
 ## Development
 

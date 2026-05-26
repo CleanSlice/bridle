@@ -38,6 +38,8 @@ const chat = init({
 | `title` | string | no | Header text. Default: `Agent Chat` |
 | `placeholder` | string | no | Input placeholder |
 | `theme` | `Record<string, string>` | no | CSS variable overrides |
+| `customCss` | string | no | Inline CSS injected into the shadow root. See [Theming › Overriding internal classes](/embed/theming#overriding-internal-classes) |
+| `stylesheets` | `string \| string[]` | no | Stylesheet URL(s) loaded into the shadow root as `<link rel="stylesheet">` |
 | `onReady` | `() => void` | no | Fires when the WebSocket connects |
 | `onMessage` | `(msg: IBridleMessage) => void` | no | Fires on each completed agent message |
 | `onError` | `(err: Error) => void` | no | Fires on connection errors |

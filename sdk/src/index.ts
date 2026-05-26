@@ -49,6 +49,39 @@ function applyThemeVars(el: HTMLElement, vars: Record<string, string> | undefine
   }
 }
 
+// Inject embedder-supplied CSS into the element's shadow root. CSS custom
+// properties cross the shadow boundary, but ordinary selectors don't — so
+// `themeVars` can't restyle `.bridle__panel`. This injection covers that gap.
+// Vue's defineCustomElement attaches the shadow root in connectedCallback,
+// so by the time we're called (after appendChild) `el.shadowRoot` is ready.
+function injectCustomStyles(
+  el: HTMLElement,
+  css: string | undefined,
+  stylesheets: string | string[] | undefined,
+): void {
+  const root = el.shadowRoot
+  if (!root) return
+  if (css) {
+    const style = document.createElement('style')
+    style.dataset.bridleCustom = ''
+    style.textContent = css
+    root.appendChild(style)
+  }
+  const urls = Array.isArray(stylesheets)
+    ? stylesheets
+    : stylesheets
+      ? [stylesheets]
+      : []
+  for (const href of urls) {
+    if (!href) continue
+    const link = document.createElement('link')
+    link.rel = 'stylesheet'
+    link.href = href
+    link.dataset.bridleCustom = ''
+    root.appendChild(link)
+  }
+}
+
 function init(opts: IBridleInitOptions): IBridleInstance {
   if (typeof document === 'undefined') {
     throw new Error('[bridle] init() can only run in a browser')
@@ -110,6 +143,8 @@ function init(opts: IBridleInitOptions): IBridleInstance {
   }
   parent.appendChild(el)
 
+  injectCustomStyles(el, opts.customCss, opts.stylesheets)
+
   // Hook UI events to the optional callbacks. Listeners are bound on the
   // element itself — Vue's defineCustomElement re-emits component events as
   // native CustomEvents.
@@ -140,6 +175,12 @@ function autoMount(): void {
   const ds = script.dataset
   if (!ds.agentId) return
   const apiUrl = ds.apiUrl ?? new URL(script.src).origin
+  // `data-stylesheet` may be comma-separated for multiple URLs:
+  //   data-stylesheet="/css/a.css, /css/b.css"
+  const stylesheets = ds.stylesheet
+    ?.split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
   init({
     apiUrl,
     agentId: ds.agentId,
@@ -151,6 +192,8 @@ function autoMount(): void {
     theme: ds.theme as 'default' | 'cleanslice' | undefined,
     colorMode: ds.colorMode as 'auto' | 'light' | 'dark' | undefined,
     prompt: ds.prompt,
+    customCss: ds.customCss,
+    stylesheets,
   })
 }
 

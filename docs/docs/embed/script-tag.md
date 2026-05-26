@@ -26,6 +26,8 @@ When the script loads, it auto-registers a `<bridle-chat>` Custom Element and mo
 | `data-mount` | `<body>` | CSS selector for inline mode, e.g. `#chat-container` |
 | `data-title` | `Agent Chat` | Header text |
 | `data-placeholder` | `Type a message...` | Input placeholder |
+| `data-custom-css` | optional | Inline CSS injected into the shadow root — see [Theming › Overriding internal classes](/embed/theming#overriding-internal-classes) |
+| `data-stylesheet` | optional | Stylesheet URL(s) loaded into the shadow root. Comma-separate for multiple files |
 
 ## Choosing where to load the script from
 

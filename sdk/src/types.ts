@@ -67,6 +67,18 @@ export interface IBridleInitOptions {
    * Example: `{ '--bridle-primary': '#0070f3' }`.
    */
   themeVars?: Record<string, string>
+  /**
+   * Extra CSS injected into the chat element's shadow root. Use this when
+   * `themeVars` isn't enough — e.g. to restyle `.bridle__panel`,
+   * `.bridle__bubble`, or any internal class. Ordinary host-page CSS can't
+   * cross the shadow boundary; this string can.
+   */
+  customCss?: string
+  /**
+   * Stylesheet URL(s) loaded inside the shadow root via `<link rel="stylesheet">`.
+   * Same use-case as `customCss` but kept in an external file you can cache.
+   */
+  stylesheets?: string | string[]
   /** Hooks for headless side effects in addition to the UI. */
   onReady?: () => void
   onMessage?: (message: IBridleMessage) => void
