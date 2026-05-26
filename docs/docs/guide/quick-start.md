@@ -79,7 +79,8 @@ When you need to fetch the token from the client (SPA, dynamic auth):
 ## With a bundler (Vite, Next, Webpack)
 
 ```bash
-npm i @cleanslice/bridle
+bun add @cleanslice/bridle
+# or: npm i / pnpm add / yarn add @cleanslice/bridle
 ```
 
 ```ts

@@ -5,7 +5,8 @@ When you don't want the built-in widget UI and would rather render your own. The
 ## Install
 
 ```bash
-npm i @cleanslice/bridle
+bun add @cleanslice/bridle
+# or: npm i / pnpm add / yarn add @cleanslice/bridle
 ```
 
 ## Usage

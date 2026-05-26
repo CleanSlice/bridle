@@ -5,6 +5,8 @@ When you control the build (Vite, Next, Nuxt, Webpack, Rollup), use the npm pack
 ## Install
 
 ```bash
+bun add @cleanslice/bridle
+# or
 npm i @cleanslice/bridle
 # or
 pnpm add @cleanslice/bridle
