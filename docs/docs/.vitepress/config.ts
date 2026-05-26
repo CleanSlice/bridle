@@ -5,7 +5,12 @@ export default defineConfig({
   appearance: 'dark',
   title: 'Bridle',
   description: 'Embed an AI agent chat into any website with a single <script> tag.',
-  cleanUrls: true,
+  // Disabled — DigitalOcean Static Sites doesn't strip `.html` from URLs the
+  // way Netlify/Vercel do, so `cleanUrls: true` plus a direct browser hit on
+  // `/embed/npm` returned 404 (only SPA navigation from another page worked,
+  // because Vue Router handled the mapping client-side). With this off,
+  // internal links include `.html` and every URL works on direct load.
+  cleanUrls: false,
   lastUpdated: true,
 
   head: [
