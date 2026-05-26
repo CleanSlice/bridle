@@ -53,6 +53,7 @@ export default defineConfig({
     logo: '/logo.svg',
 
     nav: [
+      { text: 'Examples', link: '/examples/basic' },
       { text: 'Guide', link: '/guide/introduction' },
       { text: 'Embed', link: '/embed/script-tag' },
       { text: 'Protocol', link: '/protocol/overview' },
@@ -68,6 +69,17 @@ export default defineConfig({
     ],
 
     sidebar: {
+      '/examples/': [
+        {
+          text: 'Examples',
+          items: [
+            { text: '01 · Basic', link: '/examples/basic' },
+            { text: '02 · Inline', link: '/examples/inline' },
+            { text: '03 · Styles', link: '/examples/styles' },
+            { text: '04 · Authenticator', link: '/examples/authenticator' },
+          ],
+        },
+      ],
       '/guide/': [
         {
           text: 'Guide',
