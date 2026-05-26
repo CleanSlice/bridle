@@ -609,6 +609,20 @@ defineExpose({
   max-height: none;
 }
 
+/* On narrow viewports the 380×560 panel feels cramped, especially with the
+   keyboard up. Switch it to fixed-position near-fullscreen — pinned 8px from
+   each side, leaving 88px at the bottom for the FAB to stay tappable. */
+@media (max-width: 480px) {
+  .bridle--floating .bridle__panel {
+    position: fixed;
+    inset: 8px 8px 88px 8px;
+    width: auto;
+    max-width: none;
+    height: auto;
+    max-height: none;
+  }
+}
+
 .bridle__header {
   display: flex;
   align-items: center;

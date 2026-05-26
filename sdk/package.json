@@ -1,6 +1,6 @@
 {
   "name": "@cleanslice/bridle",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Embeddable web chat for Bridle — drop-in <script> or programmatic init.",
   "type": "module",
   "main": "./dist/bridle.mjs",
