@@ -21,6 +21,23 @@ export default defineConfig({
       },
     ],
     ['meta', { property: 'og:url', content: 'https://bridle.cleanslice.org' }],
+    // Floating chat bubble on every docs page. Public agent — origin is
+    // whitelisted on the hub so no JWT is needed. The SDK auto-mounts into
+    // document.body, so SPA navigation between docs pages keeps the chat
+    // and its connection alive (the element lives outside Vue's tree).
+    [
+      'script',
+      {
+        src: '/sdk/latest.js',
+        'data-api-url': 'https://api.ranch.cleanslice.org',
+        'data-agent-id': 'agent-74c579f3-4700-4531-84f6-f8a621f98fa3',
+        'data-mode': 'floating',
+        'data-title': 'Ask Bridle',
+        'data-placeholder': 'Ask about embedding, the protocol, deploy…',
+        'data-theme': 'cleanslice',
+        defer: '',
+      },
+    ],
   ],
 
   sitemap: {
