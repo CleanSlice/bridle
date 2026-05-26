@@ -20,8 +20,13 @@
       "import": "./dist/client.mjs"
     }
   },
-  "files": ["dist", "README.md"],
-  "sideEffects": ["./dist/bridle.js"],
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "sideEffects": [
+    "./dist/bridle.js"
+  ],
   "engines": {
     "node": ">=20"
   },
@@ -57,7 +62,7 @@
   "homepage": "https://bridle.cleanslice.org",
   "repository": {
     "type": "git",
-    "url": "https://github.com/CleanSlice/bridle.git",
+    "url": "git+https://github.com/CleanSlice/bridle.git",
     "directory": "sdk"
   }
 }
