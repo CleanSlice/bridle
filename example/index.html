@@ -2,70 +2,258 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Bridle embed — example</title>
-    <style>
-      body { font-family: system-ui, sans-serif; margin: 24px; }
-      .hint { font-size: 13px; color: #555; max-width: 480px; }
-      code { background: #f3f4f6; padding: 1px 5px; border-radius: 3px; }
-      #status { font-size: 12px; color: #888; }
-      #status.error { color: #b91c1c; }
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bridle embed — integration examples</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style type="text/tailwindcss">
+      @layer base {
+        body { @apply bg-slate-50 text-slate-900 antialiased; }
+        code { @apply rounded bg-slate-100 px-1 py-0.5 font-mono text-[0.85em] text-slate-800; }
+        pre code { @apply bg-transparent p-0 text-slate-100; }
+      }
     </style>
   </head>
   <body>
-    <p class="hint">
-      The token, hub URL, and agent id all come from this page's backend
-      (<code>GET /embed/token</code>), which calls
-      <code>POST /auth/embed/token</code> on the Ranch hub using
-      <code>RANCH_API_KEY</code> — the key never reaches the browser.
-    </p>
-    <p id="status">Minting token…</p>
+    <div class="mx-auto max-w-4xl px-6 py-12">
+      <!-- Header: explains what this page is and the current token status. -->
+      <header class="mb-12 text-center">
+        <p class="text-xs font-semibold uppercase tracking-widest text-indigo-600">CleanSlice · Bridle SDK</p>
+        <h1 class="mt-2 text-4xl font-bold tracking-tight">Bridle integration examples</h1>
+        <p class="mx-auto mt-4 max-w-xl text-slate-600">
+          Four ways to drop the chat widget onto a site — from a single
+          <code>&lt;script&gt;</code> in HEAD to programmatic init with a
+          dynamic token.
+        </p>
+        <p id="status" class="mt-4 text-xs text-slate-500">Minting token from the backend…</p>
+      </header>
 
-    <div id="bridle-chat" style="height: 600px; max-width: 480px;"></div>
+      <!-- 1. BASIC: one <script> tag with data-* attributes. -->
+      <!--    The SDK registers the custom element and mounts a floating button. -->
+      <section class="mb-10 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <span class="text-xs font-semibold uppercase tracking-widest text-indigo-600">01 · basic</span>
+        <h2 class="mt-1 text-2xl font-semibold">Basic — one <code>&lt;script&gt;</code> tag</h2>
+        <p class="mt-2 text-slate-600">
+          The shortest path. The SDK reads <code>data-*</code> from its own
+          script tag, mounts a floating bubble in the corner of the page, and
+          opens the WebSocket itself. The Ranch API key stays on the server —
+          only a short-lived JWT reaches the browser via <code>data-token</code>.
+        </p>
+        <pre class="mt-4 overflow-x-auto rounded-lg bg-slate-900 p-4 text-sm"><code>&lt;script
+  src="https://bridle.cleanslice.org/sdk/latest.js"
+  data-api-url="https://hub.example.com"
+  data-agent-id="agent-31a6fbd1-…"
+  data-token="&lt;jwt&gt;"
+&gt;&lt;/script&gt;</code></pre>
+        <p class="mt-3 text-xs text-slate-500">
+          ↘ live demo — floating button in the bottom-right corner of this page.
+        </p>
+      </section>
+
+      <!-- 2. INLINE: chat is mounted inside a specific container. -->
+      <!--    Good for support pages or dashboard panels — no floating bubble. -->
+      <section class="mb-10 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <span class="text-xs font-semibold uppercase tracking-widest text-indigo-600">02 · inline</span>
+        <h2 class="mt-1 text-2xl font-semibold">Inline — embed into the page</h2>
+        <p class="mt-2 text-slate-600">
+          The <code>inline</code> mode mounts the chat right inside the given
+          <code>mount</code> container instead of a floating bubble. The chat
+          size is defined by the container size.
+        </p>
+        <div class="mt-4 grid gap-4 md:grid-cols-2">
+          <pre class="overflow-x-auto rounded-lg bg-slate-900 p-4 text-xs"><code>Bridle.init({
+  apiUrl,
+  agentId,
+  token,
+  mode: 'inline',
+  mount: '#chat-inline',
+  title: 'Support chat',
+})</code></pre>
+          <div id="chat-inline" class="h-[520px]"></div>
+        </div>
+      </section>
+
+      <!-- 3. STYLES: theme + CSS variables + custom CSS injected into shadow root. -->
+      <!--    themeVars forward any --bridle-* CSS custom property. -->
+      <!--    customCss is injected straight into the shadow root — needed to style -->
+      <!--    internal classes (.bridle__panel, etc.) that host CSS can't reach. -->
+      <section class="mb-10 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <span class="text-xs font-semibold uppercase tracking-widest text-indigo-600">03 · styles</span>
+        <h2 class="mt-1 text-2xl font-semibold">Styles — theme, variables and custom CSS</h2>
+        <p class="mt-2 text-slate-600">
+          Built-in palettes (<code>default</code> / <code>cleanslice</code>),
+          overrides via CSS custom properties, and your own CSS injected into
+          the shadow root for the widget's internal classes.
+        </p>
+        <div class="mt-4 grid gap-4 md:grid-cols-2">
+          <pre class="overflow-x-auto rounded-lg bg-slate-900 p-4 text-xs"><code>Bridle.init({
+  apiUrl,
+  agentId,
+  token,
+  mode: 'inline',
+  mount: '#chat-styled',
+  theme: 'cleanslice',
+  colorMode: 'light',
+  themeVars: {
+    '--bridle-primary': '#6366f1',
+    '--bridle-radius': '14px',
+  },
+  customCss: `
+    .bridle__panel {
+      border: 1px solid #c7d2fe;
+      box-shadow: 0 8px 24px rgba(99,102,241,0.18);
+      border-radius: 14px;
+    }
+  `,
+})</code></pre>
+          <div id="chat-styled" class="h-[520px]"></div>
+        </div>
+      </section>
+
+      <!-- 4. AUTHENTICATOR: token is passed as a function instead of a string. -->
+      <!--    The SDK awaits it on mount (and can call it again to refresh). -->
+      <!--    RANCH_API_KEY never reaches the browser — our backend fetches the token. -->
+      <section class="mb-10 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <span class="text-xs font-semibold uppercase tracking-widest text-indigo-600">04 · authenticator</span>
+        <h2 class="mt-1 text-2xl font-semibold">Authenticator — token as a function</h2>
+        <p class="mt-2 text-slate-600">
+          Instead of a string in <code>token</code>, pass a function: the SDK
+          will call it and await the <code>Promise&lt;string&gt;</code>. Under
+          the hood the function hits your own backend for a fresh JWT — the
+          Ranch API key stays server-side.
+        </p>
+        <div class="mt-4 grid gap-4 md:grid-cols-2">
+          <pre class="overflow-x-auto rounded-lg bg-slate-900 p-4 text-xs"><code>Bridle.init({
+  apiUrl,
+  agentId,
+  // called before connecting —
+  // re-mint the token here if needed
+  token: async () =&gt; {
+    const r = await fetch('/embed/token?sub=user-42')
+    if (!r.ok) throw new Error(`token ${r.status}`)
+    const { token } = await r.json()
+    return token
+  },
+  mode: 'inline',
+  mount: '#chat-authn',
+  onReady: () =&gt; console.log('[bridle] ready'),
+  onError: (e) =&gt; console.error('[bridle] error', e),
+})</code></pre>
+          <div id="chat-authn" class="h-[520px]"></div>
+        </div>
+      </section>
+
+      <footer class="mt-12 border-t border-slate-200 pt-6 text-center text-xs text-slate-500">
+        SDK v<span id="sdk-version">?</span> ·
+        <a class="underline hover:text-slate-700" href="https://bridle.cleanslice.org">documentation</a>
+      </footer>
+    </div>
 
     <script>
-      // Mint the JWT on our backend first, then drop the canonical bridle
-      // script tag with `data-token`. The SDK auto-mounts from the script's
-      // dataset — same shape as the production embed snippet, with the
-      // raw API key staying server-side.
+      // Loading flow:
+      // 1) Fetch tokens from our own /embed/token (the backend talks to Ranch).
+      // 2) Insert the exact <script data-*> an integrator would put on their
+      //    site. The SDK loads, the IIFE exposes window.Bridle and auto-mounts
+      //    the first widget from its own dataset.
+      // 3) On its onload, mount the remaining 3 widgets via Bridle.init().
+      //
+      // Each token uses a different `sub` so the four sockets don't compete
+      // for the same clientId in the hub.
       (async () => {
         const status = document.getElementById('status');
-        try {
-          const res = await fetch('/embed/token?sub=user-123&email=alice@example.com');
-          if (!res.ok) {
-            const body = await res.json().catch(() => ({}));
-            throw new Error(body.error || `token endpoint ${res.status}`);
-          }
-          const { token, apiUrl, agentId } = await res.json();
+        const setError = (msg) => {
+          status.textContent = msg;
+          status.classList.remove('text-slate-500');
+          status.classList.add('text-rose-600');
+        };
 
-          const script = document.createElement('script');
-          script.src = '/sdk/latest.js';
-          script.dataset.apiUrl = apiUrl;
-          script.dataset.agentId = agentId;
-          script.dataset.mode = 'inline';
-          script.dataset.mount = '#bridle-chat';
-          script.dataset.token = token;
-          // Demo of the customCss option (v0.8.0): inject CSS straight into
-          // the SDK's shadow root to restyle internal classes that CSS
-          // variables can't reach. Remove this block for the stock look.
-          script.dataset.customCss = `
-            .bridle__panel {
-              border-radius: 5px;
-              box-shadow: 0px 2px 6px #00000029;
-              border: 1px solid #C5D5FF;
-            }
-          `;
-          script.onload = () => status.remove();
-          script.onerror = () => {
-            status.classList.add('error');
-            status.textContent = 'Failed to load bridle SDK';
+        try {
+          const [basic, inline, styled] = await Promise.all(
+            ['demo-basic', 'demo-inline', 'demo-styled'].map(mintToken),
+          );
+
+          // 01 · basic — REAL <script data-*>. This is exactly what an
+          // integrator drops onto their site: src + data-api-url +
+          // data-agent-id + data-token. The SDK reads its dataset and mounts
+          // a floating button in the corner of the page.
+          const sdk = document.createElement('script');
+          sdk.src = '/sdk/latest.js';
+          sdk.dataset.apiUrl = basic.apiUrl;
+          sdk.dataset.agentId = basic.agentId;
+          sdk.dataset.token = basic.token;
+          sdk.dataset.title = 'Chat';
+
+          sdk.onerror = () => setError('Failed to load /sdk/latest.js');
+          sdk.onload = () => {
+            document.getElementById('sdk-version').textContent = window.Bridle.version;
+            status.textContent = 'Ready — 4 widgets mounted.';
+
+            // 02 · inline — mount inside #chat-inline.
+            Bridle.init({
+              apiUrl: inline.apiUrl,
+              agentId: inline.agentId,
+              token: inline.token,
+              mode: 'inline',
+              mount: '#chat-inline',
+              title: 'Support chat',
+            });
+
+            // 03 · styles — cleanslice theme + CSS variables + CSS injection
+            // into the shadow root.
+            Bridle.init({
+              apiUrl: styled.apiUrl,
+              agentId: styled.agentId,
+              token: styled.token,
+              mode: 'inline',
+              mount: '#chat-styled',
+              title: 'Helper',
+              theme: 'cleanslice',
+              colorMode: 'light',
+              themeVars: {
+                '--bridle-primary': '#6366f1',
+                '--bridle-radius': '14px',
+              },
+              customCss: `
+                .bridle__panel {
+                  border: 1px solid #c7d2fe;
+                  box-shadow: 0 8px 24px rgba(99,102,241,0.18);
+                  border-radius: 14px;
+                }
+              `,
+            });
+
+            // 04 · authenticator — token as a function; the SDK calls it itself.
+            // apiUrl/agentId are reused (it's the same agent).
+            Bridle.init({
+              apiUrl: basic.apiUrl,
+              agentId: basic.agentId,
+              mode: 'inline',
+              mount: '#chat-authn',
+              title: 'Auth via token()',
+              token: async () => {
+                const r = await fetch('/embed/token?sub=demo-authn');
+                if (!r.ok) throw new Error(`token ${r.status}`);
+                const { token } = await r.json();
+                return token;
+              },
+              onReady: () => console.log('[bridle] authn ready'),
+              onError: (e) => console.error('[bridle] authn error', e),
+            });
           };
-          document.body.appendChild(script);
+          document.head.appendChild(sdk);
         } catch (err) {
-          status.classList.add('error');
-          status.textContent = `Failed to start bridle: ${err.message}`;
           console.error(err);
+          setError(`Init failed: ${err.message}`);
         }
       })();
+
+      async function mintToken(sub) {
+        const r = await fetch(`/embed/token?sub=${encodeURIComponent(sub)}`);
+        if (!r.ok) {
+          const body = await r.json().catch(() => ({}));
+          throw new Error(body.error || `token endpoint ${r.status}`);
+        }
+        return r.json(); // { token, apiUrl, agentId, expiresAt }
+      }
     </script>
   </body>
 </html>
