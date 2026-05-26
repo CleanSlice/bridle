@@ -110,6 +110,7 @@ function init(opts: IBridleInitOptions): IBridleInstance {
   if (opts.theme) el.setAttribute('theme', opts.theme)
   if (opts.colorMode) el.setAttribute('color-mode', opts.colorMode)
   if (opts.prompt) el.setAttribute('prompt', opts.prompt)
+  if (opts.fabIcon) el.setAttribute('fab-icon', opts.fabIcon)
 
   applyThemeVars(el, opts.themeVars)
 
@@ -192,6 +193,7 @@ function autoMount(): void {
     theme: ds.theme as 'default' | 'cleanslice' | undefined,
     colorMode: ds.colorMode as 'auto' | 'light' | 'dark' | undefined,
     prompt: ds.prompt,
+    fabIcon: ds.fabIcon,
     customCss: ds.customCss,
     stylesheets,
   })

@@ -79,6 +79,12 @@ export interface IBridleInitOptions {
    * Same use-case as `customCss` but kept in an external file you can cache.
    */
   stylesheets?: string | string[]
+  /**
+   * URL of the icon shown on the floating FAB in place of the built-in
+   * chat-bubble glyph. Any URL the browser can render in `<img>` works —
+   * `.svg`, `.png`, `.webp`, or a `data:` URI. Floating mode only.
+   */
+  fabIcon?: string
   /** Hooks for headless side effects in addition to the UI. */
   onReady?: () => void
   onMessage?: (message: IBridleMessage) => void

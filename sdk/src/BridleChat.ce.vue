@@ -63,6 +63,12 @@ const props = withDefaults(
      * user plan, etc.). Sent once at handshake.
      */
     prompt?: string
+    /**
+     * Replace the built-in chat-bubble glyph on the floating FAB with your
+     * own image. Accepts any URL the browser can render in `<img>` —
+     * `.svg`, `.png`, `.webp`, or a `data:` URI.
+     */
+    fabIcon?: string
   }>(),
   {
     title: 'Agent Chat',
@@ -362,7 +368,14 @@ defineExpose({
       :title="title"
       @click="toggle"
     >
-      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+      <img
+        v-if="fabIcon"
+        :src="fabIcon"
+        :alt="title"
+        class="bridle__fab-icon"
+        aria-hidden="true"
+      />
+      <svg v-else viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
         <path
           d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
           fill="none"
@@ -580,6 +593,13 @@ defineExpose({
 }
 .bridle__fab:hover { transform: scale(1.05); }
 .bridle__fab:active { transform: scale(0.96); }
+.bridle__fab-icon {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+  display: block;
+  pointer-events: none;
+}
 
 .bridle__panel {
   position: absolute;
