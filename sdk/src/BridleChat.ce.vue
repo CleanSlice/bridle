@@ -3,7 +3,29 @@ import { ref, onMounted, onBeforeUnmount, watch, nextTick, useHost } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { BridleClient, BridleAuthError } from './client'
-import type { IBridleMessage } from './types'
+import type { BridlePart, IBridleMessage } from './types'
+
+interface IBridleAttachment {
+  id: string
+  name: string
+  size: number
+  mediaType: string
+  base64: string
+  dataUrl: string
+}
+
+// 5 attachments fits comfortably; bigger payloads start to choke the
+// default Socket.IO 1 MB buffer even after the downscale pass below.
+const MAX_ATTACHMENTS = 5
+// Reject the original file outright above this — we still downscale,
+// but a 50 MB raw image bricks the browser before the canvas even runs.
+const MAX_FILE_SIZE = 10 * 1024 * 1024
+// Anything larger gets routed through the downscale pass so the Socket.IO
+// payload stays well under the 1 MB default. Smaller files ship as-is —
+// no quality loss when we don't need it.
+const DOWNSCALE_OVER = 800 * 1024
+const MAX_DIMENSION = 1280
+const JPEG_QUALITY = 0.85
 
 // One-time DOMPurify hook: route agent-supplied links through a new tab so a
 // rogue href never navigates the host page out from under the embed.
@@ -94,8 +116,12 @@ const isTyping = ref(false)
 const connectionError = ref<BridleAuthError | Error | null>(null)
 const isOpen = ref(props.mode === 'inline' || coerceBool(props.defaultOpen))
 const draft = ref('')
+const attachments = ref<IBridleAttachment[]>([])
+const isDraggingFile = ref(false)
+const dragCounter = ref(0)
 const scrollEl = ref<HTMLElement | null>(null)
 const inputEl = ref<HTMLTextAreaElement | null>(null)
+const fileInputEl = ref<HTMLInputElement | null>(null)
 
 let client: BridleClient | null = null
 
@@ -260,21 +286,191 @@ async function loadTranscript(channel: string): Promise<void> {
 
 function send(): void {
   const text = draft.value.trim()
-  if (!text || !client) return
+  if (!client) return
+  if (!text && attachments.value.length === 0) return
+
+  // Image parts come first so the agent sees the image before the caption
+  // — matches how every chat client orders attached media + accompanying text.
+  const parts: BridlePart[] = attachments.value.map((a) => ({
+    type: 'image' as const,
+    base64: a.base64,
+    mediaType: a.mediaType,
+  }))
+  if (text) parts.push({ type: 'text', text })
+
   upsert({
     id: randomId(),
     role: 'user',
     text,
-    parts: [{ type: 'text', text }],
+    parts,
     ts: Date.now(),
   })
   isTyping.value = true
-  client.send(text)
+  client.send(text, parts)
   draft.value = ''
+  attachments.value = []
   // autoSize() set an inline height on growth; clearing the value alone
   // leaves the textarea tall and empty. Drop the inline style so it falls
   // back to the rows="1" baseline.
   if (inputEl.value) inputEl.value.style.height = ''
+}
+
+function readAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(file)
+  })
+}
+
+function loadImage(file: File): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file)
+    const img = new Image()
+    img.onload = () => {
+      URL.revokeObjectURL(url)
+      resolve(img)
+    }
+    img.onerror = (err) => {
+      URL.revokeObjectURL(url)
+      reject(err)
+    }
+    img.src = url
+  })
+}
+
+// Small files (≤ DOWNSCALE_OVER) keep their original encoding so PNGs with
+// transparency stay PNGs. Large files get drawn into a canvas, capped at
+// MAX_DIMENSION on the longest edge, then re-encoded as JPEG — the only
+// reliable way to keep the Socket.IO payload under 1 MB without nuking detail.
+async function fileToImagePart(
+  file: File,
+): Promise<{ base64: string; mediaType: string }> {
+  if (file.size <= DOWNSCALE_OVER) {
+    const dataUrl = await readAsDataUrl(file)
+    return {
+      base64: dataUrl.split(',', 2)[1] ?? '',
+      mediaType: file.type || 'application/octet-stream',
+    }
+  }
+  const img = await loadImage(file)
+  const scale = Math.min(MAX_DIMENSION / img.width, MAX_DIMENSION / img.height, 1)
+  const w = Math.max(1, Math.round(img.width * scale))
+  const h = Math.max(1, Math.round(img.height * scale))
+  const canvas = document.createElement('canvas')
+  canvas.width = w
+  canvas.height = h
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Canvas 2D context unavailable')
+  ctx.drawImage(img, 0, 0, w, h)
+  const dataUrl = canvas.toDataURL('image/jpeg', JPEG_QUALITY)
+  return {
+    base64: dataUrl.split(',', 2)[1] ?? '',
+    mediaType: 'image/jpeg',
+  }
+}
+
+async function addFiles(files: FileList | File[]): Promise<void> {
+  for (const file of Array.from(files)) {
+    if (attachments.value.length >= MAX_ATTACHMENTS) break
+    if (!file.type.startsWith('image/')) {
+      console.warn(`[bridle] skipping non-image attachment: ${file.name} (${file.type})`)
+      continue
+    }
+    if (file.size > MAX_FILE_SIZE) {
+      console.warn(`[bridle] attachment too large: ${file.name} (${file.size} bytes)`)
+      continue
+    }
+    try {
+      const { base64, mediaType } = await fileToImagePart(file)
+      attachments.value.push({
+        id: randomId(),
+        name: file.name,
+        size: file.size,
+        mediaType,
+        base64,
+        dataUrl: `data:${mediaType};base64,${base64}`,
+      })
+    } catch (err) {
+      console.warn(`[bridle] failed to read attachment ${file.name}:`, err)
+    }
+  }
+}
+
+function onFileChange(e: Event): void {
+  const input = e.target as HTMLInputElement
+  if (input.files && input.files.length) {
+    void addFiles(input.files)
+    // Reset so picking the same file twice in a row still fires `change`.
+    input.value = ''
+  }
+}
+
+function removeAttachment(id: string): void {
+  attachments.value = attachments.value.filter((a) => a.id !== id)
+}
+
+function openFilePicker(): void {
+  if (attachments.value.length >= MAX_ATTACHMENTS) return
+  fileInputEl.value?.click()
+}
+
+// Drag overlay lives at the panel level. Counter avoids the classic
+// flicker where `dragleave` fires for every child element you pass over.
+function dragHasFiles(e: DragEvent): boolean {
+  return !!e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files')
+}
+
+function onDragEnter(e: DragEvent): void {
+  if (!dragHasFiles(e)) return
+  e.preventDefault()
+  dragCounter.value++
+  isDraggingFile.value = true
+}
+
+function onDragOver(e: DragEvent): void {
+  if (!dragHasFiles(e)) return
+  e.preventDefault()
+}
+
+function onDragLeave(e: DragEvent): void {
+  if (!dragHasFiles(e)) return
+  e.preventDefault()
+  dragCounter.value = Math.max(0, dragCounter.value - 1)
+  if (dragCounter.value === 0) isDraggingFile.value = false
+}
+
+function onDrop(e: DragEvent): void {
+  if (!dragHasFiles(e)) return
+  e.preventDefault()
+  dragCounter.value = 0
+  isDraggingFile.value = false
+  if (e.dataTransfer?.files.length) {
+    void addFiles(e.dataTransfer.files)
+  }
+}
+
+function onPaste(e: ClipboardEvent): void {
+  const items = e.clipboardData?.items
+  if (!items) return
+  const files: File[] = []
+  for (const item of Array.from(items)) {
+    if (item.kind === 'file' && item.type.startsWith('image/')) {
+      const f = item.getAsFile()
+      if (f) files.push(f)
+    }
+  }
+  if (files.length) {
+    e.preventDefault()
+    void addFiles(files)
+  }
+}
+
+function imageParts(m: IBridleMessage): Array<{ base64: string; mediaType: string }> {
+  return m.parts
+    .filter((p): p is { type: 'image'; base64: string; mediaType: string } => p.type === 'image')
+    .map((p) => ({ base64: p.base64, mediaType: p.mediaType }))
 }
 
 function randomId(): string {
@@ -387,7 +583,16 @@ defineExpose({
       </svg>
     </button>
 
-    <div v-show="isOpen" class="bridle__panel" role="dialog" :aria-label="title">
+    <div
+      v-show="isOpen"
+      class="bridle__panel"
+      role="dialog"
+      :aria-label="title"
+      @dragenter="onDragEnter"
+      @dragover="onDragOver"
+      @dragleave="onDragLeave"
+      @drop="onDrop"
+    >
       <header class="bridle__header">
         <span class="bridle__title">{{ title }}</span>
         <span
@@ -441,16 +646,91 @@ defineExpose({
           <div
             v-if="m.role === 'assistant'"
             class="bridle__bubble bridle__bubble--md"
-            v-html="renderMarkdown(m.text)"
-          />
-          <div v-else class="bridle__bubble">{{ m.text }}</div>
+          >
+            <div
+              v-for="(p, i) in imageParts(m)"
+              :key="`img-${i}`"
+              class="bridle__msg-image"
+            >
+              <img
+                :src="`data:${p.mediaType};base64,${p.base64}`"
+                alt=""
+                loading="lazy"
+              />
+            </div>
+            <div v-if="m.text" v-html="renderMarkdown(m.text)" />
+          </div>
+          <div v-else class="bridle__bubble">
+            <div
+              v-for="(p, i) in imageParts(m)"
+              :key="`img-${i}`"
+              class="bridle__msg-image"
+            >
+              <img
+                :src="`data:${p.mediaType};base64,${p.base64}`"
+                alt=""
+                loading="lazy"
+              />
+            </div>
+            <span v-if="m.text" class="bridle__msg-text">{{ m.text }}</span>
+          </div>
         </div>
         <div v-if="isTyping" class="bridle__typing" aria-label="Agent is typing">
           <span /><span /><span />
         </div>
       </div>
 
+      <div
+        v-show="isDraggingFile"
+        class="bridle__drop-overlay"
+        aria-hidden="true"
+      >
+        <div class="bridle__drop-hint">Drop image to attach</div>
+      </div>
+
+      <div v-if="attachments.length" class="bridle__attachments">
+        <div
+          v-for="a in attachments"
+          :key="a.id"
+          class="bridle__attachment"
+        >
+          <img :src="a.dataUrl" :alt="a.name" class="bridle__attachment-img" />
+          <button
+            type="button"
+            class="bridle__attachment-remove"
+            aria-label="Remove attachment"
+            @click="removeAttachment(a.id)"
+          >×</button>
+        </div>
+      </div>
+
       <form class="bridle__input" @submit.prevent="send">
+        <input
+          ref="fileInputEl"
+          type="file"
+          accept="image/*"
+          multiple
+          class="bridle__file-input"
+          @change="onFileChange"
+        />
+        <button
+          type="button"
+          class="bridle__attach"
+          aria-label="Attach image"
+          :disabled="!isConnected || attachments.length >= MAX_ATTACHMENTS"
+          @click="openFilePicker"
+        >
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+            <path
+              d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </button>
         <textarea
           ref="inputEl"
           v-model="draft"
@@ -459,8 +739,12 @@ defineExpose({
           rows="1"
           @input="autoSize"
           @keydown="onKeydown"
+          @paste="onPaste"
         />
-        <button type="submit" :disabled="!isConnected || !draft.trim()">
+        <button
+          type="submit"
+          :disabled="!isConnected || (!draft.trim() && attachments.length === 0)"
+        >
           <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
             <path
               d="M5 12h14M13 6l6 6-6 6"
@@ -885,7 +1169,7 @@ defineExpose({
 }
 .bridle__input textarea:disabled { opacity: 0.6; cursor: not-allowed; }
 
-.bridle__input button {
+.bridle__input button[type="submit"] {
   flex-shrink: 0;
   background: var(--bridle-primary);
   color: var(--bridle-primary-fg);
@@ -899,9 +1183,129 @@ defineExpose({
   justify-content: center;
   transition: opacity 0.15s ease;
 }
-.bridle__input button:disabled {
+.bridle__input button[type="submit"]:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
-.bridle__input button:not(:disabled):hover { opacity: 0.9; }
+.bridle__input button[type="submit"]:not(:disabled):hover { opacity: 0.9; }
+
+/* ---- Attachments ---- */
+.bridle__file-input {
+  display: none;
+}
+
+.bridle__attach {
+  background: transparent;
+  color: var(--bridle-muted);
+  border: 1px solid var(--bridle-border);
+  border-radius: 10px;
+  width: 36px;
+  height: 36px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.bridle__attach:not(:disabled):hover {
+  color: var(--bridle-primary);
+  border-color: var(--bridle-primary);
+}
+.bridle__attach:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.bridle__attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 12px 0;
+  background: var(--bridle-bg-elv);
+  border-top: 1px solid var(--bridle-border);
+  flex-shrink: 0;
+}
+
+.bridle__attachment {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--bridle-border);
+  background: var(--bridle-bg);
+}
+
+.bridle__attachment-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.bridle__attachment-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  border: 0;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.bridle__attachment-remove:hover {
+  background: rgba(0, 0, 0, 0.85);
+}
+
+/* ---- Drag-over overlay ---- */
+.bridle__drop-overlay {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--bridle-primary) 14%, var(--bridle-bg));
+  border: 2px dashed var(--bridle-primary);
+  border-radius: var(--bridle-radius);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 5;
+  pointer-events: none;
+}
+.bridle__drop-hint {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--bridle-primary);
+}
+
+/* ---- Image parts inside message bubbles ---- */
+.bridle__msg-image {
+  margin-bottom: 6px;
+  border-radius: 10px;
+  overflow: hidden;
+  max-width: 240px;
+  background: rgba(0, 0, 0, 0.04);
+}
+.bridle__msg-image:last-child {
+  margin-bottom: 0;
+}
+.bridle__msg-image img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.bridle__msg-text {
+  display: block;
+  margin-top: 6px;
+}
+.bridle__msg-text:first-child {
+  margin-top: 0;
+}
 </style>

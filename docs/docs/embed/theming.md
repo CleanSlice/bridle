@@ -124,8 +124,17 @@ Cascade order: your overrides are appended **after** the component's own `<style
 | `.bridle__msg--user` / `.bridle__msg--assistant` | Bubble wrapper per role |
 | `.bridle__input` | Footer composer (textarea + send button) |
 | `.bridle__fab` | Floating action button (floating mode only) |
+| `.bridle__fab-icon` | Custom `<img>` inside the FAB when `fabIcon` is set |
 | `.bridle__typing` | Three-dot typing indicator |
 | `.bridle__banner--error` | Connection-error banner |
+| `.bridle__attach` | Paperclip button that opens the image picker |
+| `.bridle__attachments` | Thumbnail strip above the input for staged image attachments |
+| `.bridle__attachment` | One staged attachment thumbnail (56×56) |
+| `.bridle__attachment-img` | The thumbnail image inside an attachment |
+| `.bridle__attachment-remove` | The × button on a thumbnail |
+| `.bridle__drop-overlay` | Tinted dashed overlay shown while a file is being dragged over the panel |
+| `.bridle__drop-hint` | "Drop image to attach" label inside the drop overlay |
+| `.bridle__msg-image` | Image rendered inside a message bubble (user or assistant) |
 
 These class names are part of the SDK's public surface — they won't be renamed without a major-version bump.
 
