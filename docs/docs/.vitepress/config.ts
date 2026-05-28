@@ -97,6 +97,7 @@ export default defineConfig({
             { text: 'Script Tag', link: '/embed/script-tag' },
             { text: 'NPM (Bundler)', link: '/embed/npm' },
             { text: 'Headless Client', link: '/embed/headless' },
+            { text: 'Page Context', link: '/embed/context' },
             { text: 'Theming', link: '/embed/theming' },
           ],
         },

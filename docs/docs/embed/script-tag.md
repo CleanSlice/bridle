@@ -29,6 +29,7 @@ When the script loads, it auto-registers a `<bridle-chat>` Custom Element and mo
 | `data-custom-css` | optional | Inline CSS injected into the shadow root — see [Theming › Overriding internal classes](/embed/theming#overriding-internal-classes) |
 | `data-stylesheet` | optional | Stylesheet URL(s) loaded into the shadow root. Comma-separate for multiple files |
 | `data-fab-icon` | optional | URL of an image to replace the FAB's built-in chat-bubble glyph (floating mode). See [Theming › Custom FAB icon](/embed/theming#custom-fab-icon) |
+| `data-prompt` | optional | Free-form context string sent at handshake and forwarded to the agent on every message — page URL, user plan, locale, A/B cohort, etc. See [Page Context](/embed/context) |
 
 ## Choosing where to load the script from
 
