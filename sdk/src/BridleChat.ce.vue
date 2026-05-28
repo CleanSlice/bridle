@@ -1227,6 +1227,13 @@ defineExpose({
   flex-shrink: 0;
 }
 
+/* When the attachment strip is visible it already provides the divider
+   above the input area — drop the form's own border-top so the two
+   1px lines don't stack into a double rule. */
+.bridle__attachments + .bridle__input {
+  border-top: 0;
+}
+
 .bridle__attachment {
   position: relative;
   width: 56px;
