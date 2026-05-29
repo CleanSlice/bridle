@@ -7,6 +7,8 @@ export enum BridlePartTypes {
   Text = 'text',
   Image = 'image',
   File = 'file',
+  Ui = 'ui',
+  UiSubmit = 'ui_submit',
 }
 
 export interface IBridleTextPart {
@@ -27,7 +29,97 @@ export interface IBridleFilePart {
   mimeType?: string
 }
 
-export type BridlePart = IBridleTextPart | IBridleImagePart | IBridleFilePart
+// ── Interactive UI parts ─────────────────────────────────────
+// Agent sends `ui` parts; the SDK renders them as a form and returns the
+// answers as a `ui_submit` part in the next user message. Other channels
+// (Telegram, etc.) ignore these parts — the agent should fall back to
+// plain text when `msg.capabilities` doesn't include `'ui'`.
+
+export type BridleUiOption = { value: string; label: string }
+
+export type BridleUiComponent =
+  | { type: 'heading'; text: string }
+  | { type: 'text'; text: string }
+  | {
+      type: 'input'
+      name: string
+      label?: string
+      placeholder?: string
+      required?: boolean
+      default?: string
+    }
+  | {
+      type: 'textarea'
+      name: string
+      label?: string
+      placeholder?: string
+      required?: boolean
+      default?: string
+    }
+  | {
+      type: 'radio'
+      name: string
+      label?: string
+      required?: boolean
+      default?: string
+      options: BridleUiOption[]
+    }
+  | { type: 'checkbox'; name: string; label: string; default?: boolean }
+  | {
+      type: 'checkbox-group'
+      name: string
+      label?: string
+      required?: boolean
+      default?: string[]
+      options: BridleUiOption[]
+    }
+  | {
+      type: 'select'
+      name: string
+      label?: string
+      placeholder?: string
+      required?: boolean
+      default?: string
+      options: BridleUiOption[]
+    }
+
+export interface IBridleUiPart {
+  type: BridlePartTypes.Ui
+  uiId: string
+  components: BridleUiComponent[]
+  submit?: { label?: string }
+}
+
+export type BridleUiValue = string | boolean | string[]
+
+export interface IBridleUiSubmitPart {
+  type: BridlePartTypes.UiSubmit
+  uiId: string
+  values: Record<string, BridleUiValue>
+}
+
+export type BridlePart =
+  | IBridleTextPart
+  | IBridleImagePart
+  | IBridleFilePart
+  | IBridleUiPart
+  | IBridleUiSubmitPart
+
+/**
+ * Helper for building a UI part the SDK can render. Generates `uiId` if
+ * absent so the agent always knows what to match on submit.
+ */
+export function buildUiForm(
+  components: BridleUiComponent[],
+  opts: { uiId?: string; submitLabel?: string } = {},
+): IBridleUiPart {
+  return {
+    type: BridlePartTypes.Ui,
+    uiId: opts.uiId ?? `ui-${randomUUID()}`,
+    components,
+    ...(opts.submitLabel ? { submit: { label: opts.submitLabel } } : {}),
+  }
+}
 
 // ── Channel gateway interface ────────────────────────────────
 
@@ -55,6 +147,16 @@ export interface IBridleMessageData {
    * integrator give the agent page/user/tenant context without code changes.
    */
   prompt?: string
+  /**
+   * What the client SDK can render. Sent at handshake by Bridle (since
+   * v0.12.0) and forwarded by the hub on every message. Check this before
+   * sending parts that not all channels can render — e.g. `ui` parts only
+   * show up when `capabilities.includes('ui')`.
+   *
+   * Known capabilities (Bridle): `'streaming'`, `'images'`, `'files'`, `'ui'`.
+   * Older clients or non-Bridle channels won't set it.
+   */
+  capabilities?: string[]
 }
 
 // ── Admin protocol — debug + sync ─────────────────────────────

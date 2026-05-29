@@ -6,11 +6,15 @@ Every message — user or agent, streaming or final, WebSocket or HTTP — carri
 
 ```ts
 enum BridlePartTypes {
-  Text = 'text',
-  Image = 'image',
-  File = 'file',
+  Text     = 'text',
+  Image    = 'image',
+  File     = 'file',
+  Ui       = 'ui',          // agent → browser: interactive form
+  UiSubmit = 'ui_submit',   // browser → agent: form answers
 }
 ```
+
+For the `ui` / `ui_submit` round-trip used to render interactive forms inside chat bubbles, see [Protocol → Interactive UI](/protocol/ui).
 
 ### Text
 

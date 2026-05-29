@@ -72,6 +72,10 @@ export class BridleClient {
     const url = this.opts.apiUrl.replace(/\/$/, '')
 
     const prompt = this.opts.prompt?.trim()
+    // What this client can render. The hub forwards the list to the agent
+    // on every message — runtimes use it to skip part types this peer
+    // can't display (e.g. don't emit `ui` parts to a Telegram client).
+    const capabilities = ['streaming', 'images', 'files', 'ui']
     const socket = io(`${url}/ws/client`, {
       transports: ['websocket'],
       reconnection: true,
@@ -79,6 +83,7 @@ export class BridleClient {
       auth: {
         token,
         agentId: this.opts.agentId,
+        capabilities,
         ...(prompt ? { prompt } : {}),
       },
     })

@@ -3,7 +3,13 @@ import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick, useHost } f
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { BridleClient, BridleAuthError } from './client'
-import type { BridlePart, IBridleMessage } from './types'
+import type {
+  BridlePart,
+  BridleUiValue,
+  IBridleMessage,
+  IBridleUiPart,
+  IBridleUiSubmitPart,
+} from './types'
 
 interface IBridleAttachment {
   id: string
@@ -162,6 +168,15 @@ const fileInputEl = ref<HTMLInputElement | null>(null)
 // fire while a transcript replay is still racing in from the hub.
 const greetingShown = ref(false)
 let greetingTimer: ReturnType<typeof setTimeout> | null = null
+// Per-uiId form state keyed by the ui part's uiId. Multiple forms in one
+// message stay independent. `submitted` flips on send so we can disable
+// the form and freeze its values in the transcript.
+interface IUiFormState {
+  values: Record<string, BridleUiValue>
+  submitted: boolean
+  error: string | null
+}
+const uiState = ref<Record<string, IUiFormState>>({})
 
 let client: BridleClient | null = null
 
@@ -513,6 +528,115 @@ function imageParts(m: IBridleMessage): Array<{ base64: string; mediaType: strin
     .map((p) => ({ base64: p.base64, mediaType: p.mediaType }))
 }
 
+function uiParts(m: IBridleMessage): IBridleUiPart[] {
+  return m.parts.filter((p): p is IBridleUiPart => p.type === 'ui')
+}
+
+function uiSubmitParts(m: IBridleMessage): IBridleUiSubmitPart[] {
+  return m.parts.filter((p): p is IBridleUiSubmitPart => p.type === 'ui_submit')
+}
+
+// Initialize per-uiId state from a part's defaults the first time we see it.
+// Idempotent: re-renders during streaming don't reset what the user typed.
+function ensureUiState(part: IBridleUiPart): IUiFormState {
+  const existing = uiState.value[part.uiId]
+  if (existing) return existing
+  const values: Record<string, BridleUiValue> = {}
+  for (const c of part.components) {
+    if (c.type === 'heading' || c.type === 'text') continue
+    if (c.type === 'checkbox') {
+      values[c.name] = !!c.default
+    } else if (c.type === 'checkbox-group') {
+      values[c.name] = Array.isArray(c.default) ? [...c.default] : []
+    } else {
+      values[c.name] = typeof c.default === 'string' ? c.default : ''
+    }
+  }
+  const fresh: IUiFormState = { values, submitted: false, error: null }
+  uiState.value[part.uiId] = fresh
+  return fresh
+}
+
+function setUiValue(uiId: string, name: string, value: BridleUiValue): void {
+  const state = uiState.value[uiId]
+  if (!state || state.submitted) return
+  state.values[name] = value
+  if (state.error) state.error = null
+}
+
+function toggleUiCheckboxGroup(uiId: string, name: string, value: string): void {
+  const state = uiState.value[uiId]
+  if (!state || state.submitted) return
+  const current = (state.values[name] as string[] | undefined) ?? []
+  const next = current.includes(value)
+    ? current.filter((v) => v !== value)
+    : [...current, value]
+  state.values[name] = next
+  if (state.error) state.error = null
+}
+
+function submitUiForm(part: IBridleUiPart): void {
+  const state = ensureUiState(part)
+  if (state.submitted || !client) return
+  // Validate required fields. First failure short-circuits with a single
+  // human-readable error rendered above the submit button.
+  for (const c of part.components) {
+    if (c.type === 'heading' || c.type === 'text' || c.type === 'checkbox') continue
+    if (!c.required) continue
+    const v = state.values[c.name]
+    const label = ('label' in c && c.label) || c.name
+    if (c.type === 'checkbox-group') {
+      if (!Array.isArray(v) || v.length === 0) {
+        state.error = `${label} — pick at least one option`
+        return
+      }
+    } else if (typeof v !== 'string' || v.trim() === '') {
+      state.error = `${label} is required`
+      return
+    }
+  }
+  state.error = null
+  state.submitted = true
+
+  const submitPart: IBridleUiSubmitPart = {
+    type: 'ui_submit',
+    uiId: part.uiId,
+    values: { ...state.values },
+  }
+  // Show the user's submission in the transcript as a regular user turn.
+  // Plain-text fallback so transcripts and non-Bridle channels stay readable.
+  const summary = summarizeUiValues(part, state.values)
+  upsert({
+    id: randomId(),
+    role: 'user',
+    text: summary,
+    parts: [submitPart],
+    ts: Date.now(),
+  })
+  isTyping.value = true
+  client.send('', [submitPart])
+}
+
+function summarizeUiValues(
+  part: IBridleUiPart,
+  values: Record<string, BridleUiValue>,
+): string {
+  const parts: string[] = []
+  for (const c of part.components) {
+    if (c.type === 'heading' || c.type === 'text') continue
+    const label = ('label' in c && c.label) || c.name
+    const v = values[c.name]
+    if (c.type === 'checkbox') {
+      parts.push(`${label}: ${v ? 'yes' : 'no'}`)
+    } else if (Array.isArray(v)) {
+      parts.push(`${label}: ${v.join(', ') || '—'}`)
+    } else {
+      parts.push(`${label}: ${String(v).trim() || '—'}`)
+    }
+  }
+  return parts.join(' · ')
+}
+
 function randomId(): string {
   const c = (globalThis as unknown as { crypto?: Crypto }).crypto
   if (c?.randomUUID) return c.randomUUID()
@@ -834,6 +958,144 @@ defineExpose({
               />
             </div>
             <div v-if="m.text" v-html="renderMarkdown(m.text)" />
+            <form
+              v-for="(p, ui) in uiParts(m)"
+              :key="`ui-${p.uiId ?? ui}`"
+              class="bridle__ui"
+              :class="{ 'bridle__ui--submitted': ensureUiState(p).submitted }"
+              @submit.prevent="submitUiForm(p)"
+            >
+              <template v-for="(c, ci) in p.components" :key="`c-${ci}`">
+                <h4 v-if="c.type === 'heading'" class="bridle__ui-heading">{{ c.text }}</h4>
+                <p v-else-if="c.type === 'text'" class="bridle__ui-text">{{ c.text }}</p>
+                <label
+                  v-else-if="c.type === 'input'"
+                  class="bridle__ui-field"
+                >
+                  <span v-if="c.label" class="bridle__ui-label">
+                    {{ c.label }}<span v-if="c.required" class="bridle__ui-required">*</span>
+                  </span>
+                  <input
+                    type="text"
+                    class="bridle__ui-input"
+                    :value="ensureUiState(p).values[c.name]"
+                    :placeholder="c.placeholder"
+                    :required="c.required"
+                    :disabled="ensureUiState(p).submitted"
+                    @input="setUiValue(p.uiId, c.name, ($event.target as HTMLInputElement).value)"
+                  />
+                </label>
+                <label
+                  v-else-if="c.type === 'textarea'"
+                  class="bridle__ui-field"
+                >
+                  <span v-if="c.label" class="bridle__ui-label">
+                    {{ c.label }}<span v-if="c.required" class="bridle__ui-required">*</span>
+                  </span>
+                  <textarea
+                    class="bridle__ui-textarea"
+                    rows="3"
+                    :value="ensureUiState(p).values[c.name]"
+                    :placeholder="c.placeholder"
+                    :required="c.required"
+                    :disabled="ensureUiState(p).submitted"
+                    @input="setUiValue(p.uiId, c.name, ($event.target as HTMLTextAreaElement).value)"
+                  />
+                </label>
+                <fieldset
+                  v-else-if="c.type === 'radio'"
+                  class="bridle__ui-field bridle__ui-fieldset"
+                  :disabled="ensureUiState(p).submitted"
+                >
+                  <legend v-if="c.label" class="bridle__ui-label">
+                    {{ c.label }}<span v-if="c.required" class="bridle__ui-required">*</span>
+                  </legend>
+                  <label
+                    v-for="opt in c.options"
+                    :key="opt.value"
+                    class="bridle__ui-choice"
+                  >
+                    <input
+                      type="radio"
+                      :name="`${p.uiId}-${c.name}`"
+                      :value="opt.value"
+                      :checked="ensureUiState(p).values[c.name] === opt.value"
+                      :required="c.required"
+                      :disabled="ensureUiState(p).submitted"
+                      @change="setUiValue(p.uiId, c.name, opt.value)"
+                    />
+                    <span>{{ opt.label }}</span>
+                  </label>
+                </fieldset>
+                <label
+                  v-else-if="c.type === 'checkbox'"
+                  class="bridle__ui-field bridle__ui-choice"
+                >
+                  <input
+                    type="checkbox"
+                    :checked="!!ensureUiState(p).values[c.name]"
+                    :disabled="ensureUiState(p).submitted"
+                    @change="setUiValue(p.uiId, c.name, ($event.target as HTMLInputElement).checked)"
+                  />
+                  <span>{{ c.label }}</span>
+                </label>
+                <fieldset
+                  v-else-if="c.type === 'checkbox-group'"
+                  class="bridle__ui-field bridle__ui-fieldset"
+                  :disabled="ensureUiState(p).submitted"
+                >
+                  <legend v-if="c.label" class="bridle__ui-label">
+                    {{ c.label }}<span v-if="c.required" class="bridle__ui-required">*</span>
+                  </legend>
+                  <label
+                    v-for="opt in c.options"
+                    :key="opt.value"
+                    class="bridle__ui-choice"
+                  >
+                    <input
+                      type="checkbox"
+                      :value="opt.value"
+                      :checked="((ensureUiState(p).values[c.name] as string[] | undefined) ?? []).includes(opt.value)"
+                      :disabled="ensureUiState(p).submitted"
+                      @change="toggleUiCheckboxGroup(p.uiId, c.name, opt.value)"
+                    />
+                    <span>{{ opt.label }}</span>
+                  </label>
+                </fieldset>
+                <label
+                  v-else-if="c.type === 'select'"
+                  class="bridle__ui-field"
+                >
+                  <span v-if="c.label" class="bridle__ui-label">
+                    {{ c.label }}<span v-if="c.required" class="bridle__ui-required">*</span>
+                  </span>
+                  <select
+                    class="bridle__ui-select"
+                    :value="ensureUiState(p).values[c.name]"
+                    :required="c.required"
+                    :disabled="ensureUiState(p).submitted"
+                    @change="setUiValue(p.uiId, c.name, ($event.target as HTMLSelectElement).value)"
+                  >
+                    <option v-if="c.placeholder" value="" disabled>{{ c.placeholder }}</option>
+                    <option
+                      v-for="opt in c.options"
+                      :key="opt.value"
+                      :value="opt.value"
+                    >{{ opt.label }}</option>
+                  </select>
+                </label>
+              </template>
+              <p
+                v-if="ensureUiState(p).error"
+                class="bridle__ui-error"
+                role="alert"
+              >{{ ensureUiState(p).error }}</p>
+              <button
+                type="submit"
+                class="bridle__ui-submit"
+                :disabled="!isConnected || ensureUiState(p).submitted"
+              >{{ ensureUiState(p).submitted ? 'Sent' : (p.submit?.label ?? 'Apply') }}</button>
+            </form>
           </div>
           <div v-else class="bridle__bubble">
             <div
@@ -847,7 +1109,15 @@ defineExpose({
                 loading="lazy"
               />
             </div>
-            <span v-if="m.text" class="bridle__msg-text">{{ m.text }}</span>
+            <div
+              v-for="(p, i) in uiSubmitParts(m)"
+              :key="`sub-${i}`"
+              class="bridle__ui-summary"
+            >
+              <span class="bridle__ui-summary-label">Submitted</span>
+              <span class="bridle__ui-summary-values">{{ m.text || '—' }}</span>
+            </div>
+            <span v-if="m.text && uiSubmitParts(m).length === 0" class="bridle__msg-text">{{ m.text }}</span>
           </div>
         </div>
         <div v-if="isTyping" class="bridle__typing" aria-label="Agent is typing">
@@ -1559,5 +1829,134 @@ defineExpose({
 }
 .bridle__msg-text:first-child {
   margin-top: 0;
+}
+
+/* ---- Interactive UI form parts ---- */
+.bridle__ui {
+  margin-top: 8px;
+  padding: 12px;
+  border: 1px solid var(--bridle-border);
+  border-radius: 10px;
+  background: var(--bridle-bg-elv);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.bridle__ui:first-child { margin-top: 0; }
+.bridle__ui--submitted { opacity: 0.7; }
+
+.bridle__ui-heading {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--bridle-fg);
+  line-height: 1.3;
+}
+.bridle__ui-text {
+  margin: 0;
+  font-size: 13px;
+  color: var(--bridle-muted);
+  line-height: 1.4;
+}
+
+.bridle__ui-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--bridle-fg);
+}
+.bridle__ui-fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  gap: 6px;
+}
+.bridle__ui-label {
+  font-weight: 500;
+}
+.bridle__ui-required {
+  color: var(--bridle-error-fg, #dc2626);
+  margin-left: 2px;
+}
+
+.bridle__ui-input,
+.bridle__ui-textarea,
+.bridle__ui-select {
+  font-family: inherit;
+  font-size: 13px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--bridle-border);
+  background: var(--bridle-bg);
+  color: var(--bridle-fg);
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.bridle__ui-textarea { resize: vertical; min-height: 56px; }
+.bridle__ui-input:focus,
+.bridle__ui-textarea:focus,
+.bridle__ui-select:focus {
+  border-color: var(--bridle-primary);
+  box-shadow: 0 0 0 3px var(--bridle-focus-ring);
+}
+
+.bridle__ui-choice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-weight: 400;
+}
+.bridle__ui-choice input {
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--bridle-primary);
+}
+.bridle__ui-fieldset:disabled .bridle__ui-choice,
+.bridle__ui-choice input:disabled {
+  cursor: not-allowed;
+}
+
+.bridle__ui-error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--bridle-error-fg, #dc2626);
+}
+
+.bridle__ui-submit {
+  align-self: flex-start;
+  background: var(--bridle-primary);
+  color: var(--bridle-primary-fg);
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+.bridle__ui-submit:not(:disabled):hover { opacity: 0.9; }
+.bridle__ui-submit:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* User-side summary bubble for a sent ui_submit. Keeps the visitor's
+   choice visible in the transcript without dumping raw JSON. */
+.bridle__ui-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+}
+.bridle__ui-summary-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.75;
+}
+.bridle__ui-summary-values {
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 </style>

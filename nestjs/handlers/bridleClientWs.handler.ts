@@ -68,11 +68,19 @@ export class BridleClientWsHandler implements OnGatewayConnection, OnGatewayDisc
       agentId?: string
       botId?: string
       prompt?: string
+      capabilities?: string[]
     }
     // Accept legacy `botId` from cached pre-0.3.0 SDK bundles in the wild.
     const agentId = handshakeAuth.agentId ?? handshakeAuth.botId
     const origin = client.handshake.headers.origin
     const prompt = handshakeAuth.prompt?.trim() || undefined
+    // What the client peer can render. Forwarded on every message so the
+    // agent runtime can pick part types this peer supports. Older SDKs
+    // (≤0.11.0) don't send it — the agent should fall back to text in that
+    // case if it intended to emit something fancy like `ui` parts.
+    const capabilities = Array.isArray(handshakeAuth.capabilities)
+      ? handshakeAuth.capabilities.filter((c): c is string => typeof c === 'string')
+      : undefined
 
     // Emit a structured reason, then drop the connection.
     // `disconnect(true)` forces the engine.io transport closed before the
@@ -130,14 +138,14 @@ export class BridleClientWsHandler implements OnGatewayConnection, OnGatewayDisc
       return reject(code)
     }
 
-    client.data = { clientId, agentId, email, isAdmin }
+    client.data = { clientId, agentId, email, isAdmin, capabilities }
 
     const send = (data: unknown) => {
       const event = (data as Record<string, unknown>)?.type as string ?? 'data'
       client.emit(event, data)
     }
 
-    this.hub.registerClient(clientId, agentId, send, isAdmin, prompt)
+    this.hub.registerClient(clientId, agentId, send, isAdmin, prompt, capabilities)
     client.emit('welcome', { clientId })
     // Snapshot the runtime's current online state immediately so the chat UI
     // can render the right indicator before any subsequent register/unregister

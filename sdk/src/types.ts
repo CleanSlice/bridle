@@ -5,6 +5,85 @@ export type BridlePart =
   | { type: 'text'; text: string }
   | { type: 'image'; base64: string; mediaType: string }
   | { type: 'file'; url: string; name: string; mimeType?: string }
+  | IBridleUiPart
+  | IBridleUiSubmitPart
+
+// ── Interactive UI parts ──────────────────────────────────────
+// Agent → Browser: render an interactive form inside a bubble.
+// Browser → Agent: ship the submitted values back, scoped by uiId.
+
+export type BridleUiOption = { value: string; label: string }
+
+export type BridleUiComponent =
+  | { type: 'heading'; text: string }
+  | { type: 'text'; text: string }
+  | {
+      type: 'input'
+      name: string
+      label?: string
+      placeholder?: string
+      required?: boolean
+      default?: string
+    }
+  | {
+      type: 'textarea'
+      name: string
+      label?: string
+      placeholder?: string
+      required?: boolean
+      default?: string
+    }
+  | {
+      type: 'radio'
+      name: string
+      label?: string
+      required?: boolean
+      default?: string
+      options: BridleUiOption[]
+    }
+  | {
+      type: 'checkbox'
+      name: string
+      label: string
+      default?: boolean
+    }
+  | {
+      type: 'checkbox-group'
+      name: string
+      label?: string
+      required?: boolean
+      default?: string[]
+      options: BridleUiOption[]
+    }
+  | {
+      type: 'select'
+      name: string
+      label?: string
+      placeholder?: string
+      required?: boolean
+      default?: string
+      options: BridleUiOption[]
+    }
+
+export interface IBridleUiPart {
+  type: 'ui'
+  /** Stable identifier the agent uses to match the eventual submit. Required. */
+  uiId: string
+  /** Ordered list of UI components rendered inside the form. */
+  components: BridleUiComponent[]
+  /** Submit button override. Default label: "Apply". */
+  submit?: { label?: string }
+}
+
+export type BridleUiValue = string | boolean | string[]
+
+export interface IBridleUiSubmitPart {
+  type: 'ui_submit'
+  /** Echoes back the `uiId` from the original `ui` part. */
+  uiId: string
+  /** Map of field `name` → value collected from the form. */
+  values: Record<string, BridleUiValue>
+}
 
 export interface IBridleMessage {
   id: string

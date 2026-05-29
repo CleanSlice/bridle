@@ -4,6 +4,8 @@ export enum BridlePartTypes {
   Text = 'text',
   Image = 'image',
   File = 'file',
+  Ui = 'ui',
+  UiSubmit = 'ui_submit',
 }
 
 export interface IBridleTextPart {
@@ -24,7 +26,79 @@ export interface IBridleFilePart {
   mimeType?: string
 }
 
-export type BridlePart = IBridleTextPart | IBridleImagePart | IBridleFilePart
+// ── Interactive UI parts ─────────────────────────────────────
+// Agent → Browser as `ui`, Browser → Agent as `ui_submit`.
+// The hub treats them as opaque payload — parts are forwarded as-is.
+
+export type BridleUiOption = { value: string; label: string }
+
+export type BridleUiComponent =
+  | { type: 'heading'; text: string }
+  | { type: 'text'; text: string }
+  | {
+      type: 'input'
+      name: string
+      label?: string
+      placeholder?: string
+      required?: boolean
+      default?: string
+    }
+  | {
+      type: 'textarea'
+      name: string
+      label?: string
+      placeholder?: string
+      required?: boolean
+      default?: string
+    }
+  | {
+      type: 'radio'
+      name: string
+      label?: string
+      required?: boolean
+      default?: string
+      options: BridleUiOption[]
+    }
+  | { type: 'checkbox'; name: string; label: string; default?: boolean }
+  | {
+      type: 'checkbox-group'
+      name: string
+      label?: string
+      required?: boolean
+      default?: string[]
+      options: BridleUiOption[]
+    }
+  | {
+      type: 'select'
+      name: string
+      label?: string
+      placeholder?: string
+      required?: boolean
+      default?: string
+      options: BridleUiOption[]
+    }
+
+export interface IBridleUiPart {
+  type: BridlePartTypes.Ui
+  uiId: string
+  components: BridleUiComponent[]
+  submit?: { label?: string }
+}
+
+export type BridleUiValue = string | boolean | string[]
+
+export interface IBridleUiSubmitPart {
+  type: BridlePartTypes.UiSubmit
+  uiId: string
+  values: Record<string, BridleUiValue>
+}
+
+export type BridlePart =
+  | IBridleTextPart
+  | IBridleImagePart
+  | IBridleFilePart
+  | IBridleUiPart
+  | IBridleUiSubmitPart
 
 // ── Wire protocol messages ───────────────────────────────────
 
@@ -43,6 +117,14 @@ export interface IBridleIncomingMessage {
    * it as session metadata. Empty/unset = no extra context.
    */
   prompt?: string
+  /**
+   * Client capabilities advertised at handshake (`auth.capabilities` on
+   * Socket.IO connect). Forwarded on every message so the agent can pick
+   * which part types it's safe to emit — e.g. `ui` parts only when the
+   * client supports them. Bridle SDK ≥ v0.12.0 sends
+   * `['streaming', 'images', 'files', 'ui']`.
+   */
+  capabilities?: string[]
 }
 
 /** Agent → Hub: events routed to browser clients */

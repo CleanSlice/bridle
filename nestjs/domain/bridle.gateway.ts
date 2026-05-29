@@ -33,6 +33,7 @@ export abstract class IBridleGateway {
     send: (data: unknown) => void,
     isAdmin: boolean,
     prompt?: string,
+    capabilities?: string[],
   ): void
   /** Unregister a browser client */
   abstract unregisterClient(clientId: string): void

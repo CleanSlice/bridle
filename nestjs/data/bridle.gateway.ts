@@ -74,15 +74,17 @@ export class BridleGateway extends IBridleGateway {
     send: (data: unknown) => void,
     isAdmin: boolean,
     prompt?: string,
+    capabilities?: string[],
   ): void {
     this.clients.set(clientId, {
       agentId,
       send,
       isAdmin,
       ...(prompt ? { prompt } : {}),
+      ...(capabilities && capabilities.length ? { capabilities } : {}),
     })
     this.logger.log(
-      `Browser client registered: ${clientId} agentId=${agentId} admin=${isAdmin}${prompt ? ' +prompt' : ''} (total: ${this.clients.size})`,
+      `Browser client registered: ${clientId} agentId=${agentId} admin=${isAdmin}${prompt ? ' +prompt' : ''}${capabilities?.length ? ` caps=[${capabilities.join(',')}]` : ''} (total: ${this.clients.size})`,
     )
   }
 
@@ -112,6 +114,7 @@ export class BridleGateway extends IBridleGateway {
       text,
       parts,
       ...(client?.prompt ? { prompt: client.prompt } : {}),
+      ...(client?.capabilities?.length ? { capabilities: client.capabilities } : {}),
       messageId: randomUUID(),
     })
   }
