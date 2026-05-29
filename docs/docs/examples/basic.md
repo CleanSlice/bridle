@@ -32,6 +32,18 @@ Everything below works on the script tag with **zero extra integration code** �
 
 **Image attachments** (paperclip / drag / paste) and **mobile full-bleed panel** are on by default — no flags. See [03 · Styles](/examples/styles) for theming the attachment strip.
 
+## What the agent can render
+
+Beyond plain text, the SDK renders rich `parts[]` the agent runtime sends back. None of this needs new integration code — just emit the right part type:
+
+| Part type | Renders as | Use it for |
+|-----------|-----------|------------|
+| `text` | Markdown bubble (lists, code, links, tables) | The default reply. |
+| `image` | Inline image inside the bubble | Screenshots, generated charts, photo replies. |
+| `ui` | A form (radio / checkbox / select / input / textarea) right inside the bubble, with one-shot Submit | Onboarding flows, collecting structured info mid-conversation — see [07 · Interactive forms](/examples/forms). |
+
+The SDK advertises its capabilities (`['streaming', 'images', 'files', 'ui']`) on the WebSocket handshake; the hub forwards them on every message so the agent runtime can decide which part types it's safe to emit for this peer. Older SDKs and non-Bridle channels (Telegram, email) just don't get a `capabilities` field — agents should fall back to text when it's missing.
+
 A bulkier example with all the knobs at once:
 
 ```html

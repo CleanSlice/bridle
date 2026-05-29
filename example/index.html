@@ -26,6 +26,7 @@
         </p>
         <p class="mx-auto mt-3 max-w-xl text-xs text-slate-500">
           Latest:
+          interactive forms — radio / checkbox / select (v0.12.0) ·
           empty-state suggestions (v0.11.0) ·
           <code>data-greeting</code> (v0.10.0) ·
           image attachments — drag / paste / paperclip (v0.9.0) ·
@@ -196,6 +197,82 @@
   ],
 })</code></pre>
           <div id="chat-onboarding" class="h-[520px]"></div>
+        </div>
+      </section>
+
+      <!-- 6. INTERACTIVE FORMS (v0.12.0): agent → browser `ui` part renders -->
+      <!--    a form inside the bubble; visitor → agent `ui_submit` part ships -->
+      <!--    the values back. Capability-gated on `msg.capabilities.includes('ui')` -->
+      <!--    so non-Bridle channels (Telegram, etc.) fall back to plain text. -->
+      <section class="mb-10 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <span class="text-xs font-semibold uppercase tracking-widest text-indigo-600">06 · forms</span>
+        <h2 class="mt-1 text-2xl font-semibold">Interactive forms — radio, checkbox, select</h2>
+        <p class="mt-2 text-slate-600">
+          The agent renders a form <em>inside its chat bubble</em> and gets
+          the answers back as a regular user message — wire-level it's just
+          one new <code>ui</code> part agent→browser and <code>ui_submit</code>
+          browser→agent. Used end-to-end this looks like a one-off settings
+          flow inside the conversation.
+        </p>
+        <div class="mt-4 grid gap-4 md:grid-cols-2">
+          <pre class="overflow-x-auto rounded-lg bg-slate-900 p-4 text-xs"><code>// In your agent runtime:
+import { buildUiForm } from '@cleanslice/bridle/runtime'
+
+bridle.onMessage(async (msg) =&gt; {
+  if (!msg.capabilities?.includes('ui')) {
+    // Telegram / old SDK fallback
+    await bridle.send(msg.from,
+      'Reply with basic, pro, or team')
+    return
+  }
+
+  const form = buildUiForm([
+    { type: 'heading', text: 'Pick a plan' },
+    {
+      type: 'radio', name: 'plan',
+      required: true, default: 'basic',
+      options: [
+        { value: 'basic', label: 'Basic — $0' },
+        { value: 'pro',   label: 'Pro — $10' },
+        { value: 'team',  label: 'Team — $30' },
+      ],
+    },
+    {
+      type: 'checkbox', name: 'newsletter',
+      label: 'Weekly updates',
+    },
+  ], { uiId: 'plan-2026-05', submitLabel: 'Continue' })
+
+  await bridle.send(msg.from,
+    'Quick one before we get you set up:',
+    [{ type: 'text', text: 'Quick one before we get you set up:' }, form])
+})
+
+// Next onMessage carries the answers:
+bridle.onMessage(async (msg) =&gt; {
+  for (const part of msg.parts) {
+    if (part.type === 'ui_submit'
+        &amp;&amp; part.uiId === 'plan-2026-05') {
+      const { plan, newsletter } = part.values
+      // provision + ack...
+    }
+  }
+})</code></pre>
+          <div class="flex flex-col justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-600">
+            <p class="font-semibold text-slate-800">No live demo here.</p>
+            <p class="mt-2">
+              Forms are triggered by the <em>agent</em> sending a
+              <code>ui</code> part. The public demo agent in this page
+              doesn't have a form flow wired up — the renderer kicks in
+              automatically the moment your own agent runtime emits one.
+            </p>
+            <p class="mt-2">
+              See it rendered in action on
+              <a class="underline hover:text-slate-800" href="https://bridle.cleanslice.org/examples/forms.html">examples / forms</a>
+              once your agent is wired, or browse the
+              <a class="underline hover:text-slate-800" href="https://bridle.cleanslice.org/protocol/ui.html">wire-format spec</a>.
+            </p>
+          </div>
         </div>
       </section>
 
