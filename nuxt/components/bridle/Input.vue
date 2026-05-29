@@ -38,7 +38,7 @@ const handleKeydown = (e: KeyboardEvent) => {
       v-model="input"
       :placeholder="placeholder"
       :disabled="disabled"
-      class="min-h-[40px] max-h-[120px] resize-none"
+      class="min-h-[36px] max-h-[120px] resize-none"
       :rows="1"
       @keydown="handleKeydown"
     />

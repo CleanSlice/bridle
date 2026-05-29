@@ -1392,15 +1392,17 @@ defineExpose({
 .bridle__input textarea {
   flex: 1;
   resize: none;
+  box-sizing: border-box;
   border: 1px solid var(--bridle-border);
   border-radius: 10px;
-  padding: 8px 12px;
+  padding: 7px 12px;
   font-family: inherit;
   font-size: 14px;
   line-height: 1.4;
   background: var(--bridle-bg);
   color: var(--bridle-fg);
   outline: none;
+  min-height: 36px;
   max-height: 120px;
   overflow-y: auto;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
