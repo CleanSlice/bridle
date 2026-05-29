@@ -258,20 +258,14 @@ bridle.onMessage(async (msg) =&gt; {
     }
   }
 })</code></pre>
-          <div class="flex flex-col justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-600">
-            <p class="font-semibold text-slate-800">No live demo here.</p>
-            <p class="mt-2">
-              Forms are triggered by the <em>agent</em> sending a
-              <code>ui</code> part. The public demo agent in this page
-              doesn't have a form flow wired up — the renderer kicks in
-              automatically the moment your own agent runtime emits one.
-            </p>
-            <p class="mt-2">
-              See it rendered in action on
-              <a class="underline hover:text-slate-800" href="https://bridle.cleanslice.org/examples/forms.html">examples / forms</a>
-              once your agent is wired, or browse the
-              <a class="underline hover:text-slate-800" href="https://bridle.cleanslice.org/protocol/ui.html">wire-format spec</a>.
-            </p>
+          <div class="flex flex-col gap-2">
+            <button
+              type="button"
+              id="form-trigger"
+              class="self-start rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100 disabled:opacity-50"
+              disabled
+            >Send <code>/form</code> to agent</button>
+            <div id="chat-forms" class="h-[520px]"></div>
           </div>
         </div>
       </section>
@@ -301,8 +295,8 @@ bridle.onMessage(async (msg) =&gt; {
         };
 
         try {
-          const [basic, inline, styled, onboarding] = await Promise.all(
-            ['demo-basic', 'demo-inline', 'demo-styled', 'demo-onboarding'].map(mintToken),
+          const [basic, inline, styled, onboarding, forms] = await Promise.all(
+            ['demo-basic', 'demo-inline', 'demo-styled', 'demo-onboarding', 'demo-forms'].map(mintToken),
           );
 
           // 01 · basic — REAL <script data-*>. This is exactly what an
@@ -330,7 +324,7 @@ bridle.onMessage(async (msg) =&gt; {
           sdk.onerror = () => setError('Failed to load /sdk/latest.js');
           sdk.onload = () => {
             document.getElementById('sdk-version').textContent = window.Bridle.version;
-            status.textContent = 'Ready — 5 widgets mounted.';
+            status.textContent = 'Ready — 6 widgets mounted.';
 
             // 02 · inline — mount inside #chat-inline.
             Bridle.init({
@@ -402,6 +396,29 @@ bridle.onMessage(async (msg) =&gt; {
                 'How does theming work?',
               ],
             });
+
+            // 06 · forms — same agent; the "Send /form" button below uses
+            // the returned instance's sendMessage() to fire the trigger
+            // text on the visitor's behalf. The agent must answer `/form`
+            // with a `ui` part for the renderer to kick in — see the
+            // snippet on the left of this section.
+            const formsChat = Bridle.init({
+              apiUrl: forms.apiUrl,
+              agentId: forms.agentId,
+              token: forms.token,
+              mode: 'inline',
+              mount: '#chat-forms',
+              title: 'Forms demo',
+              emptyTitle: 'Try the form flow',
+              emptySubtitle: 'Send /form (or type freely) to see the agent emit a ui part.',
+            });
+            const formTrigger = document.getElementById('form-trigger');
+            if (formTrigger) {
+              formTrigger.disabled = false;
+              formTrigger.addEventListener('click', () => {
+                formsChat.sendMessage('/form');
+              });
+            }
           };
           document.head.appendChild(sdk);
         } catch (err) {
