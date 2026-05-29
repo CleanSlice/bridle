@@ -1029,7 +1029,7 @@ defineExpose({
                 </fieldset>
                 <label
                   v-else-if="c.type === 'checkbox'"
-                  class="bridle__ui-field bridle__ui-choice"
+                  class="bridle__ui-choice"
                 >
                   <input
                     type="checkbox"
@@ -1300,6 +1300,18 @@ defineExpose({
   z-index: var(--bridle-z);
 }
 
+/* Custom elements default to `display: inline`, which gives the host no
+   definite height — so the inline panel's `height: 100%` would resolve
+   against auto and grow with the transcript, stretching the host page.
+   Make the inline host a block that fills its (fixed-height) container so
+   the 100% chain below has something concrete to resolve against. Scoped to
+   inline only; floating relies on position:fixed/absolute and must NOT take
+   block height in the page flow. */
+:host([mode="inline"]) {
+  display: block;
+  height: 100%;
+}
+
 .bridle--inline {
   display: block;
   width: 100%;
@@ -1422,6 +1434,10 @@ defineExpose({
 
 .bridle__messages {
   flex: 1;
+  /* Flex items default to min-height:auto (= content height), which keeps a
+     long transcript from shrinking and makes the column grow instead of
+     scrolling. min-height:0 lets this region shrink so overflow-y:auto wins. */
+  min-height: 0;
   overflow-y: auto;
   padding: 16px;
   display: flex;
