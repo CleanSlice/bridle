@@ -21,6 +21,8 @@ Everything below works on the script tag with **zero extra integration code** �
 |-----------|--------------|-----------|
 | `data-greeting` | Pre-seeds the first assistant bubble after a typing-indicator delay on an empty chat | [Welcome message](/examples/welcome) |
 | `data-greeting-delay` | Milliseconds before the greeting appears (default `3000`) | — |
+| `data-empty-avatar` / `data-empty-title` / `data-empty-subtitle` | Avatar + headline + sub-line shown on the empty-state screen | [Empty state](/examples/empty-state) |
+| `data-suggestions` | Pipe-separated suggestion chips on the empty state — click to send | — |
 | `data-prompt` | Free-form context forwarded to the agent on every message — page URL, plan, locale, A/B cohort | [Page Context](/embed/context) |
 | `data-fab-icon` | URL of an image to replace the FAB's built-in glyph | [Theming › Custom FAB icon](/embed/theming#custom-fab-icon) |
 | `data-custom-css` | Inline CSS injected into the shadow root to restyle internal classes | [Theming › Overriding internal classes](/embed/theming#overriding-internal-classes) |

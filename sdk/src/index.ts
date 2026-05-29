@@ -115,6 +115,14 @@ function init(opts: IBridleInitOptions): IBridleInstance {
   if (opts.greetingDelay !== undefined) {
     el.setAttribute('greeting-delay', String(opts.greetingDelay))
   }
+  if (opts.emptyAvatar) el.setAttribute('empty-avatar', opts.emptyAvatar)
+  if (opts.emptyTitle) el.setAttribute('empty-title', opts.emptyTitle)
+  if (opts.emptySubtitle) el.setAttribute('empty-subtitle', opts.emptySubtitle)
+  if (opts.suggestions?.length) {
+    // Serialize as JSON so the component's parser round-trips multi-line /
+    // pipe-containing strings without surprises.
+    el.setAttribute('suggestions', JSON.stringify(opts.suggestions))
+  }
 
   applyThemeVars(el, opts.themeVars)
 
@@ -174,6 +182,24 @@ function init(opts: IBridleInitOptions): IBridleInstance {
   }
 }
 
+// `data-suggestions` accepts either a JSON array string (when authors are
+// comfortable quoting) or a pipe-separated string (lower friction in HTML).
+function parseSuggestionsAttr(raw: string): string[] | undefined {
+  const trimmed = raw.trim()
+  if (!trimmed) return undefined
+  if (trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmed)
+      if (Array.isArray(parsed)) {
+        return parsed.map((s) => String(s).trim()).filter(Boolean)
+      }
+    } catch {
+      // Fall through to pipe-split.
+    }
+  }
+  return trimmed.split('|').map((s) => s.trim()).filter(Boolean)
+}
+
 function autoMount(): void {
   const script = _selfScript ?? findOwnScript()
   if (!script) return
@@ -200,6 +226,10 @@ function autoMount(): void {
     fabIcon: ds.fabIcon,
     greeting: ds.greeting,
     greetingDelay: ds.greetingDelay ? Number(ds.greetingDelay) : undefined,
+    emptyAvatar: ds.emptyAvatar,
+    emptyTitle: ds.emptyTitle,
+    emptySubtitle: ds.emptySubtitle,
+    suggestions: ds.suggestions ? parseSuggestionsAttr(ds.suggestions) : undefined,
     customCss: ds.customCss,
     stylesheets,
   })

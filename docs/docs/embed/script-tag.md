@@ -32,6 +32,10 @@ When the script loads, it auto-registers a `<bridle-chat>` Custom Element and mo
 | `data-prompt` | optional | Free-form context string sent at handshake and forwarded to the agent on every message — page URL, user plan, locale, A/B cohort, etc. See [Page Context](/embed/context) |
 | `data-greeting` | optional | Welcome message shown on the first open of an empty chat, after a typing-indicator delay. Markdown supported. See [Welcome message](#welcome-message) |
 | `data-greeting-delay` | `3000` | Milliseconds of typing indicator before `data-greeting` appears. Set `0` to skip the delay |
+| `data-empty-avatar` | optional | URL of an avatar shown on the empty-state screen. See [Empty state](#empty-state) |
+| `data-empty-title` | optional | Headline shown on the empty-state screen, e.g. "What can I help with?" |
+| `data-empty-subtitle` | optional | Sub-line shown under `data-empty-title` |
+| `data-suggestions` | optional | Suggestion chips rendered on the empty state. Pipe-separated (`Q1|Q2|Q3`) or a JSON array string. Clicking a chip sends it as a user message |
 
 ## Choosing where to load the script from
 
@@ -78,6 +82,47 @@ Mount the chat inside a specific container instead of floating:
 ```
 
 In inline mode, the chat fills its container. Set the height/width on the parent via CSS.
+
+## Empty state
+
+The default empty chat shows a single muted "Start a conversation" line. Pass any of `emptyAvatar` / `emptyTitle` / `emptySubtitle` / `suggestions` and you get a richer onboarding panel — agent avatar, headline, sub-line, and pill-shaped suggestion chips. Click a chip and it sends that question as a regular user message; the empty state then disappears.
+
+```html
+<script
+  src="https://bridle.cleanslice.org/sdk/latest.js"
+  data-agent-id="agent-abc-123"
+  data-token="<jwt>"
+  data-empty-avatar="/avatars/support-agent.png"
+  data-empty-title="How can I help?"
+  data-empty-subtitle="I can compare plans, schedule a demo, or open a ticket."
+  data-suggestions="Compare plans|Book a demo|Open a support ticket"
+></script>
+```
+
+Programmatic:
+
+```ts
+init({
+  apiUrl, agentId, token,
+  emptyAvatar: '/avatars/support-agent.png',
+  emptyTitle: 'How can I help?',
+  emptySubtitle: 'I can compare plans, schedule a demo, or open a ticket.',
+  suggestions: ['Compare plans', 'Book a demo', 'Open a support ticket'],
+})
+```
+
+### Behavior
+
+- Hidden as soon as `messages.length > 0` **or** the agent starts replying (`isTyping`). Suggestion chips do not flash next to a streaming reply.
+- Clicking a chip is **equivalent to typing the same text and pressing Send** — `onMessage` fires for the user turn, the runtime sees it as any other message.
+- Chips are disabled while the WebSocket isn't open, so visitors don't fire questions into a closed connection.
+- All four fields are independent — pass only the ones you want. Provide nothing and the legacy "Start a conversation" line stays.
+
+### When NOT to use it
+
+- **Long replies as chips** — chip text becomes the entire user message. Keep them short prompts ("Pricing?"), not full sentences the visitor wouldn't have typed.
+- **A FAQ list** — chips are for *opening* the conversation, not a static knowledge base. After the first user turn they're gone.
+- **Forms / structured input** — chips send free text. For "pick a plan: Basic / Pro / Team" structured selection, the runtime should emit assistant messages with parts of type the renderer understands (not a feature of the SDK today).
 
 ## Welcome message
 

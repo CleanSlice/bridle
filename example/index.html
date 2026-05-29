@@ -26,6 +26,7 @@
         </p>
         <p class="mx-auto mt-3 max-w-xl text-xs text-slate-500">
           Latest:
+          empty-state suggestions (v0.11.0) ·
           <code>data-greeting</code> (v0.10.0) ·
           image attachments — drag / paste / paperclip (v0.9.0) ·
           <code>data-fab-icon</code> (v0.8.2) ·
@@ -50,6 +51,12 @@
   data-api-url="https://hub.example.com"
   data-agent-id="agent-31a6fbd1-…"
   data-token="&lt;jwt&gt;"
+
+  &lt;!-- v0.11.0: rich empty state with avatar, headline, suggestion chips --&gt;
+  data-empty-avatar="/avatars/agent.png"
+  data-empty-title="How can I help?"
+  data-empty-subtitle="Ask anything, or pick a prompt below."
+  data-suggestions="Compare plans|Book a demo|Open a support ticket"
 
   &lt;!-- v0.10.0: pre-seed the first bubble on an empty chat --&gt;
   data-greeting="Hi! Drop a screenshot or ask me anything."
@@ -198,6 +205,12 @@
           sdk.dataset.agentId = basic.agentId;
           sdk.dataset.token = basic.token;
           sdk.dataset.title = 'Chat';
+          // v0.11.0 — rich empty state: visitor sees suggestion chips
+          // before they type. Clicking a chip fires the prompt for them.
+          sdk.dataset.emptyTitle = 'How can I help?';
+          sdk.dataset.emptySubtitle = 'Ask anything, or pick a prompt below.';
+          sdk.dataset.suggestions =
+            'Compare plans|Book a demo|How does theming work?';
           // v0.10.0 — typing dots for 2.5s, then this message lands as the
           // first assistant bubble. Cancels if the user types first.
           sdk.dataset.greeting =

@@ -78,6 +78,7 @@ export default defineConfig({
             { text: '03 · Styles', link: '/examples/styles' },
             { text: '04 · Authenticator', link: '/examples/authenticator' },
             { text: '05 · Welcome message', link: '/examples/welcome' },
+            { text: '06 · Empty state', link: '/examples/empty-state' },
           ],
         },
       ],

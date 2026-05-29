@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, watch, nextTick, useHost } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick, useHost } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { BridleClient, BridleAuthError } from './client'
@@ -104,6 +104,29 @@ const props = withDefaults(
      * message appears. Default: 3000. Set to 0 to skip the delay.
      */
     greetingDelay?: number | string
+    /**
+     * URL of an avatar image shown on the empty-state screen above the
+     * empty-state title. Any `<img>`-renderable source — SVG, PNG, WEBP,
+     * or `data:` URI.
+     */
+    emptyAvatar?: string
+    /**
+     * Headline shown on the empty-state screen, e.g. "What can I help with?".
+     * If unset, the legacy "Start a conversation" copy is used.
+     */
+    emptyTitle?: string
+    /** Sub-line shown under `emptyTitle`. Optional. */
+    emptySubtitle?: string
+    /**
+     * Preset suggestion buttons rendered as chips under the empty-state
+     * copy. Clicking one sends it as a regular user message and the
+     * empty state disappears.
+     *
+     * Pass an array via `init({ suggestions: [...] })`. On script tags, pass
+     * a pipe-separated string via `data-suggestions="Q1|Q2|Q3"` (or a JSON
+     * array string — both are accepted).
+     */
+    suggestions?: string | string[]
   }>(),
   {
     title: 'Agent Chat',
@@ -496,6 +519,45 @@ function randomId(): string {
   return 'm-' + Math.random().toString(36).slice(2) + Date.now().toString(36)
 }
 
+// Accepts either an actual string[] (from programmatic `init()`) or a
+// string (from `data-suggestions`). JSON arrays parse first; otherwise we
+// fall back to `|`-separated values so authors don't have to JSON-quote
+// every chip in an HTML attribute.
+const parsedSuggestions = computed<string[]>(() => {
+  const raw = props.suggestions
+  if (!raw) return []
+  if (Array.isArray(raw)) return raw.map((s) => String(s).trim()).filter(Boolean)
+  const trimmed = String(raw).trim()
+  if (!trimmed) return []
+  if (trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmed)
+      if (Array.isArray(parsed)) {
+        return parsed.map((s) => String(s).trim()).filter(Boolean)
+      }
+    } catch (err) {
+      console.warn('[bridle] could not parse `suggestions` as JSON, falling back to pipe-split:', err)
+    }
+  }
+  return trimmed.split('|').map((s) => s.trim()).filter(Boolean)
+})
+
+// Show the custom empty-state UI when ANY of its slots are provided.
+// Otherwise the legacy single-line "Start a conversation" copy renders.
+const hasCustomEmpty = computed(
+  () =>
+    !!props.emptyAvatar ||
+    !!props.emptyTitle ||
+    !!props.emptySubtitle ||
+    parsedSuggestions.value.length > 0,
+)
+
+function sendSuggestion(text: string): void {
+  if (!isConnected.value) return
+  draft.value = text
+  send()
+}
+
 function cancelGreetingTimer(): void {
   if (greetingTimer) {
     clearTimeout(greetingTimer)
@@ -714,8 +776,42 @@ defineExpose({
       </div>
 
       <div ref="scrollEl" class="bridle__messages">
-        <div v-if="messages.length === 0" class="bridle__empty">
-          Start a conversation
+        <!--
+          Empty state. Hidden as soon as the agent starts replying (isTyping)
+          or any message lands, so the suggestion chips disappear cleanly
+          once the conversation begins.
+        -->
+        <div
+          v-if="messages.length === 0 && !isTyping"
+          class="bridle__empty"
+          :class="{ 'bridle__empty--rich': hasCustomEmpty }"
+        >
+          <template v-if="hasCustomEmpty">
+            <img
+              v-if="emptyAvatar"
+              :src="emptyAvatar"
+              :alt="emptyTitle || title"
+              class="bridle__empty-avatar"
+            />
+            <h3 v-if="emptyTitle" class="bridle__empty-title">{{ emptyTitle }}</h3>
+            <p v-if="emptySubtitle" class="bridle__empty-subtitle">{{ emptySubtitle }}</p>
+            <div
+              v-if="parsedSuggestions.length"
+              class="bridle__suggestions"
+              role="group"
+              aria-label="Suggested questions"
+            >
+              <button
+                v-for="(s, i) in parsedSuggestions"
+                :key="i"
+                type="button"
+                class="bridle__suggestion"
+                :disabled="!isConnected"
+                @click="sendSuggestion(s)"
+              >{{ s }}</button>
+            </div>
+          </template>
+          <template v-else>Start a conversation</template>
         </div>
         <div
           v-for="m in messages"
@@ -1068,6 +1164,74 @@ defineExpose({
   color: var(--bridle-muted);
   font-size: 13px;
   margin-top: 40px;
+}
+
+/* Rich empty-state: avatar + title + subtitle + suggestion chips. */
+.bridle__empty--rich {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin-top: 24px;
+  padding: 0 8px;
+}
+.bridle__empty-avatar {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--bridle-bubble-bg);
+  border: 1px solid var(--bridle-border);
+}
+.bridle__empty-title {
+  margin: 4px 0 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--bridle-fg);
+  line-height: 1.3;
+}
+.bridle__empty-subtitle {
+  margin: 0;
+  font-size: 13px;
+  color: var(--bridle-muted);
+  line-height: 1.4;
+  max-width: 280px;
+}
+.bridle__suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 12px;
+}
+.bridle__suggestion {
+  appearance: none;
+  background: var(--bridle-bg);
+  color: var(--bridle-fg);
+  border: 1px solid var(--bridle-border);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.3;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+  max-width: 100%;
+  white-space: normal;
+  text-align: center;
+}
+.bridle__suggestion:not(:disabled):hover {
+  border-color: var(--bridle-primary);
+  color: var(--bridle-primary);
+}
+.bridle__suggestion:not(:disabled):focus-visible {
+  outline: none;
+  border-color: var(--bridle-primary);
+  box-shadow: 0 0 0 3px var(--bridle-focus-ring);
+}
+.bridle__suggestion:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .bridle__msg { display: flex; }

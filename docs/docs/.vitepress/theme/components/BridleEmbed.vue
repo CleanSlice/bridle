@@ -20,6 +20,10 @@ const props = withDefaults(
     greeting?: string
     greetingDelay?: number
     fabIcon?: string
+    emptyAvatar?: string
+    emptyTitle?: string
+    emptySubtitle?: string
+    suggestions?: string[]
   }>(),
   {
     apiUrl: DEFAULT_API_URL,
@@ -58,6 +62,10 @@ onMounted(async () => {
       greeting: props.greeting,
       greetingDelay: props.greetingDelay,
       fabIcon: props.fabIcon,
+      emptyAvatar: props.emptyAvatar,
+      emptyTitle: props.emptyTitle,
+      emptySubtitle: props.emptySubtitle,
+      suggestions: props.suggestions,
       onError: (err: Error) => {
         error.value = err.message || String(err)
       },

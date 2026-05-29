@@ -98,6 +98,25 @@ export interface IBridleInitOptions {
    * Default: 3000. Set to 0 to skip the delay.
    */
   greetingDelay?: number
+  /**
+   * URL of an avatar image shown on the empty-state screen, above the
+   * `emptyTitle`. Any URL the browser can render in `<img>` works.
+   */
+  emptyAvatar?: string
+  /** Headline shown on the empty-state screen, e.g. "What can I help with?". */
+  emptyTitle?: string
+  /** Sub-line shown under `emptyTitle`. */
+  emptySubtitle?: string
+  /**
+   * Preset suggestion chips rendered on the empty state. Clicking one
+   * sends it as a regular user message. The whole empty state disappears
+   * as soon as the conversation begins.
+   *
+   * Pass `string[]` programmatically. On script tags use
+   * `data-suggestions="Q1|Q2|Q3"` (pipe-separated, or a JSON array
+   * string — both are accepted).
+   */
+  suggestions?: string[]
   /** Hooks for headless side effects in addition to the UI. */
   onReady?: () => void
   onMessage?: (message: IBridleMessage) => void
