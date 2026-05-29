@@ -166,6 +166,39 @@
         </div>
       </section>
 
+      <!-- 5. ONBOARDING (v0.11.0): empty state with avatar + headline + chips. -->
+      <!--    All four fields are independent — set any subset to enable it. -->
+      <!--    Hidden the moment messages start arriving or the agent types. -->
+      <section class="mb-10 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <span class="text-xs font-semibold uppercase tracking-widest text-indigo-600">05 · onboarding</span>
+        <h2 class="mt-1 text-2xl font-semibold">Empty state — avatar, headline, suggestion chips</h2>
+        <p class="mt-2 text-slate-600">
+          Replace the default <em>Start a conversation</em> placeholder with
+          a real onboarding panel. Click a chip and it sends as a user
+          message; the whole block disappears the moment the conversation
+          begins. Stacks naturally on top of <code>greeting</code> and
+          <code>prompt</code>.
+        </p>
+        <div class="mt-4 grid gap-4 md:grid-cols-2">
+          <pre class="overflow-x-auto rounded-lg bg-slate-900 p-4 text-xs"><code>Bridle.init({
+  apiUrl,
+  agentId,
+  token,
+  mode: 'inline',
+  mount: '#chat-onboarding',
+  emptyAvatar: '/avatars/agent.png',
+  emptyTitle: 'How can I help?',
+  emptySubtitle: 'Ask anything, or pick a prompt.',
+  suggestions: [
+    'Compare plans',
+    'Book a demo',
+    'How does theming work?',
+  ],
+})</code></pre>
+          <div id="chat-onboarding" class="h-[520px]"></div>
+        </div>
+      </section>
+
       <footer class="mt-12 border-t border-slate-200 pt-6 text-center text-xs text-slate-500">
         SDK v<span id="sdk-version">?</span> ·
         <a class="underline hover:text-slate-700" href="https://bridle.cleanslice.org">documentation</a>
@@ -191,8 +224,8 @@
         };
 
         try {
-          const [basic, inline, styled] = await Promise.all(
-            ['demo-basic', 'demo-inline', 'demo-styled'].map(mintToken),
+          const [basic, inline, styled, onboarding] = await Promise.all(
+            ['demo-basic', 'demo-inline', 'demo-styled', 'demo-onboarding'].map(mintToken),
           );
 
           // 01 · basic — REAL <script data-*>. This is exactly what an
@@ -220,7 +253,7 @@
           sdk.onerror = () => setError('Failed to load /sdk/latest.js');
           sdk.onload = () => {
             document.getElementById('sdk-version').textContent = window.Bridle.version;
-            status.textContent = 'Ready — 4 widgets mounted.';
+            status.textContent = 'Ready — 5 widgets mounted.';
 
             // 02 · inline — mount inside #chat-inline.
             Bridle.init({
@@ -272,6 +305,25 @@
               },
               onReady: () => console.log('[bridle] authn ready'),
               onError: (e) => console.error('[bridle] authn error', e),
+            });
+
+            // 05 · onboarding — rich empty state with avatar, headline,
+            // sub-line and pre-set suggestion chips. Click a chip and it
+            // fires as a regular user message; the panel hides itself.
+            Bridle.init({
+              apiUrl: onboarding.apiUrl,
+              agentId: onboarding.agentId,
+              token: onboarding.token,
+              mode: 'inline',
+              mount: '#chat-onboarding',
+              title: 'Welcome desk',
+              emptyTitle: 'How can I help?',
+              emptySubtitle: 'Ask anything, or pick a prompt below.',
+              suggestions: [
+                'Compare plans',
+                'Book a demo',
+                'How does theming work?',
+              ],
             });
           };
           document.head.appendChild(sdk);
