@@ -85,6 +85,19 @@ export interface IBridleInitOptions {
    * `.svg`, `.png`, `.webp`, or a `data:` URI. Floating mode only.
    */
   fabIcon?: string
+  /**
+   * Welcome message shown by the agent the first time the chat is opened
+   * on an empty transcript. Rendered as a normal assistant bubble after a
+   * brief typing-indicator delay (see `greetingDelay`). Suppressed if the
+   * transcript already has messages or the user sends something during
+   * the delay. Markdown is supported.
+   */
+  greeting?: string
+  /**
+   * Milliseconds of typing indicator before `greeting` appears.
+   * Default: 3000. Set to 0 to skip the delay.
+   */
+  greetingDelay?: number
   /** Hooks for headless side effects in addition to the UI. */
   onReady?: () => void
   onMessage?: (message: IBridleMessage) => void

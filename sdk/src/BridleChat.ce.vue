@@ -91,6 +91,19 @@ const props = withDefaults(
      * `.svg`, `.png`, `.webp`, or a `data:` URI.
      */
     fabIcon?: string
+    /**
+     * Welcome message shown by the agent the first time the chat is opened
+     * on an empty transcript. Rendered as a regular assistant bubble after
+     * a brief typing-indicator delay (see `greetingDelay`). Suppressed if
+     * the transcript already has messages or the user sends something
+     * during the delay. Markdown is supported.
+     */
+    greeting?: string
+    /**
+     * Milliseconds to show the typing indicator before the `greeting`
+     * message appears. Default: 3000. Set to 0 to skip the delay.
+     */
+    greetingDelay?: number | string
   }>(),
   {
     title: 'Agent Chat',
@@ -122,6 +135,10 @@ const dragCounter = ref(0)
 const scrollEl = ref<HTMLElement | null>(null)
 const inputEl = ref<HTMLTextAreaElement | null>(null)
 const fileInputEl = ref<HTMLInputElement | null>(null)
+// One-shot guard so we don't show the greeting twice (open/close/open) or
+// fire while a transcript replay is still racing in from the hub.
+const greetingShown = ref(false)
+let greetingTimer: ReturnType<typeof setTimeout> | null = null
 
 let client: BridleClient | null = null
 
@@ -479,6 +496,54 @@ function randomId(): string {
   return 'm-' + Math.random().toString(36).slice(2) + Date.now().toString(36)
 }
 
+function cancelGreetingTimer(): void {
+  if (greetingTimer) {
+    clearTimeout(greetingTimer)
+    greetingTimer = null
+  }
+}
+
+// Triggered by the watcher whenever the panel is open + connected + empty.
+// Marks the flag immediately so re-fires (e.g. transcript arriving with
+// existing history) don't queue a second one. The actual bubble appears
+// after `greetingDelay` ms of typing indicator — and we re-check messages
+// after the delay so the user typing something first cancels it.
+function maybeShowGreeting(): void {
+  if (greetingShown.value) return
+  const text = props.greeting?.trim()
+  if (!text) return
+  if (!isOpen.value || !isConnected.value) return
+  if (messages.value.length > 0) {
+    // Real transcript already filled the panel — nothing to greet over.
+    greetingShown.value = true
+    return
+  }
+
+  greetingShown.value = true
+  isTyping.value = true
+
+  const raw =
+    typeof props.greetingDelay === 'string'
+      ? Number(props.greetingDelay)
+      : props.greetingDelay
+  const delay = Number.isFinite(raw) && raw !== undefined ? Math.max(0, raw as number) : 3000
+
+  greetingTimer = setTimeout(() => {
+    greetingTimer = null
+    isTyping.value = false
+    // User snuck a message in during the delay — drop the greeting so we
+    // don't shove it above their first turn.
+    if (messages.value.length > 0) return
+    upsert({
+      id: randomId(),
+      role: 'assistant',
+      text,
+      parts: [{ type: 'text', text }],
+      ts: Date.now(),
+    })
+  }, delay)
+}
+
 function toggle(): void {
   isOpen.value = !isOpen.value
   emit(isOpen.value ? 'open' : 'close')
@@ -515,8 +580,21 @@ watch(
   () => {
     if (!props.apiUrl || !props.agentId) return
     messages.value = []
+    cancelGreetingTimer()
+    greetingShown.value = false
     void connect()
   },
+)
+
+// Welcome message: fires once when the panel is visible, connected, and
+// the transcript is empty. Re-evaluates on each state change so we wait
+// for the transcript-replay race to settle before deciding.
+watch(
+  [isOpen, isConnected, () => messages.value.length],
+  () => {
+    maybeShowGreeting()
+  },
+  { immediate: true },
 )
 
 watch(
@@ -536,6 +614,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   unbindAutoColorMode()
+  cancelGreetingTimer()
   client?.disconnect()
   client = null
 })

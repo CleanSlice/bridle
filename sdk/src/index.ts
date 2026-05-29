@@ -111,6 +111,10 @@ function init(opts: IBridleInitOptions): IBridleInstance {
   if (opts.colorMode) el.setAttribute('color-mode', opts.colorMode)
   if (opts.prompt) el.setAttribute('prompt', opts.prompt)
   if (opts.fabIcon) el.setAttribute('fab-icon', opts.fabIcon)
+  if (opts.greeting) el.setAttribute('greeting', opts.greeting)
+  if (opts.greetingDelay !== undefined) {
+    el.setAttribute('greeting-delay', String(opts.greetingDelay))
+  }
 
   applyThemeVars(el, opts.themeVars)
 
@@ -194,6 +198,8 @@ function autoMount(): void {
     colorMode: ds.colorMode as 'auto' | 'light' | 'dark' | undefined,
     prompt: ds.prompt,
     fabIcon: ds.fabIcon,
+    greeting: ds.greeting,
+    greetingDelay: ds.greetingDelay ? Number(ds.greetingDelay) : undefined,
     customCss: ds.customCss,
     stylesheets,
   })
