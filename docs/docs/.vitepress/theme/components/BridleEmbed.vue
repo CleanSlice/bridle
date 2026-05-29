@@ -17,6 +17,9 @@ const props = withDefaults(
     themeVars?: Record<string, string>
     customCss?: string
     height?: string
+    greeting?: string
+    greetingDelay?: number
+    fabIcon?: string
   }>(),
   {
     apiUrl: DEFAULT_API_URL,
@@ -52,6 +55,9 @@ onMounted(async () => {
       colorMode: props.colorMode,
       themeVars: props.themeVars,
       customCss: props.customCss,
+      greeting: props.greeting,
+      greetingDelay: props.greetingDelay,
+      fabIcon: props.fabIcon,
       onError: (err: Error) => {
         error.value = err.message || String(err)
       },

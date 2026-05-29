@@ -24,6 +24,13 @@
           <code>&lt;script&gt;</code> in HEAD to programmatic init with a
           dynamic token.
         </p>
+        <p class="mx-auto mt-3 max-w-xl text-xs text-slate-500">
+          Latest:
+          <code>data-greeting</code> (v0.10.0) ·
+          image attachments — drag / paste / paperclip (v0.9.0) ·
+          <code>data-fab-icon</code> (v0.8.2) ·
+          <code>data-custom-css</code> (v0.8.0)
+        </p>
         <p id="status" class="mt-4 text-xs text-slate-500">Minting token from the backend…</p>
       </header>
 
@@ -43,9 +50,19 @@
   data-api-url="https://hub.example.com"
   data-agent-id="agent-31a6fbd1-…"
   data-token="&lt;jwt&gt;"
+
+  &lt;!-- v0.10.0: pre-seed the first bubble on an empty chat --&gt;
+  data-greeting="Hi! Drop a screenshot or ask me anything."
+  data-greeting-delay="2500"
+
+  &lt;!-- v0.8.2: replace the default FAB glyph --&gt;
+  data-fab-icon="/icons/chat.svg"
 &gt;&lt;/script&gt;</code></pre>
         <p class="mt-3 text-xs text-slate-500">
           ↘ live demo — floating button in the bottom-right corner of this page.
+          Open it: you'll see the typing dots for ~2.5 s, then the greeting
+          appears. Drag an image onto the panel, paste a screenshot, or click
+          the paperclip to attach it before sending.
         </p>
       </section>
 
@@ -181,6 +198,11 @@
           sdk.dataset.agentId = basic.agentId;
           sdk.dataset.token = basic.token;
           sdk.dataset.title = 'Chat';
+          // v0.10.0 — typing dots for 2.5s, then this message lands as the
+          // first assistant bubble. Cancels if the user types first.
+          sdk.dataset.greeting =
+            'Hi! Drop a screenshot or ask me anything.';
+          sdk.dataset.greetingDelay = '2500';
 
           sdk.onerror = () => setError('Failed to load /sdk/latest.js');
           sdk.onload = () => {

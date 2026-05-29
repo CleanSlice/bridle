@@ -77,6 +77,7 @@ export default defineConfig({
             { text: '02 · Inline', link: '/examples/inline' },
             { text: '03 · Styles', link: '/examples/styles' },
             { text: '04 · Authenticator', link: '/examples/authenticator' },
+            { text: '05 · Welcome message', link: '/examples/welcome' },
           ],
         },
       ],

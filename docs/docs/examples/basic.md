@@ -13,6 +13,40 @@ The shortest possible integration: one `<script>` tag with `data-*` attributes. 
 ></script>
 ```
 
+## Optional knobs
+
+Everything below works on the script tag with **zero extra integration code** — pure `data-*` attributes:
+
+| Attribute | What it does | Reference |
+|-----------|--------------|-----------|
+| `data-greeting` | Pre-seeds the first assistant bubble after a typing-indicator delay on an empty chat | [Welcome message](/examples/welcome) |
+| `data-greeting-delay` | Milliseconds before the greeting appears (default `3000`) | — |
+| `data-prompt` | Free-form context forwarded to the agent on every message — page URL, plan, locale, A/B cohort | [Page Context](/embed/context) |
+| `data-fab-icon` | URL of an image to replace the FAB's built-in glyph | [Theming › Custom FAB icon](/embed/theming#custom-fab-icon) |
+| `data-custom-css` | Inline CSS injected into the shadow root to restyle internal classes | [Theming › Overriding internal classes](/embed/theming#overriding-internal-classes) |
+| `data-stylesheet` | One or more `<link>` URLs loaded into the shadow root | — |
+| `data-color-mode` | `auto` / `light` / `dark` — overrides the page's color scheme | — |
+| `data-theme` | `default` / `cleanslice` — built-in palette | — |
+
+**Image attachments** (paperclip / drag / paste) and **mobile full-bleed panel** are on by default — no flags. See [03 · Styles](/examples/styles) for theming the attachment strip.
+
+A bulkier example with all the knobs at once:
+
+```html
+<script
+  src="https://bridle.cleanslice.org/sdk/latest.js"
+  data-api-url="https://hub.example.com"
+  data-agent-id="agent-31a6fbd1-…"
+  data-token="<jwt>"
+  data-greeting="Hi! 👋 What brings you here?"
+  data-greeting-delay="2500"
+  data-prompt="URL: https://shop.example.com/pricing · Plan: free"
+  data-fab-icon="/icons/chat.svg"
+  data-theme="cleanslice"
+  data-color-mode="auto"
+></script>
+```
+
 ## What this does
 
 | Step | Result |

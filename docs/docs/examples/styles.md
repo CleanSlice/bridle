@@ -73,6 +73,28 @@ Bridle.init({
 })
 ```
 
+## Styling image attachments
+
+The paperclip button, the staged-thumbnail strip and the drag-over overlay (all on by default since v0.9.0) expose their own classes — restyle them through the same `customCss` channel:
+
+```js
+Bridle.init({
+  apiUrl, agentId, token,
+  mode: 'inline',
+  mount: '#chat-styled',
+  customCss: `
+    .bridle__attach { border-color: #6366f1; color: #6366f1; }
+    .bridle__attachments { background: #eef2ff; }
+    .bridle__attachment { border-color: #c7d2fe; }
+    .bridle__drop-overlay { background: rgba(99, 102, 241, 0.18); border-color: #6366f1; }
+    .bridle__drop-hint { color: #4338ca; }
+    .bridle__msg-image { max-width: 280px; }
+  `,
+})
+```
+
+Full class reference — [Theming › Internal classes you can target](/embed/theming#internal-classes-you-can-target).
+
 ## Next
 
 Full variable list and theming patterns — [Embed → Theming](/embed/theming).
