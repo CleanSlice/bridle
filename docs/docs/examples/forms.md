@@ -4,6 +4,21 @@ The agent renders a form **inside its chat bubble** — radio groups, checkboxes
 
 Bridle-only feature. Telegram, email, and pre-v0.12 SDK clients don't render it — see [capability discovery](#capability-discovery) below.
 
+## Drop-in helper for the showcase
+
+If you just want the `/form` demo working end-to-end (the same flow the [embed example page](https://github.com/CleanSlice/bridle/blob/main/example/index.html) and its trigger button use), `bridle/runtime/` ships a one-line opt-in:
+
+```ts
+import { BridleRepository } from './channels/bridle.repository'
+import { attachFormDemo }   from './channels/bridle.demo'
+
+const bridle = new BridleRepository(process.env.BRIDLE_URL)
+attachFormDemo(bridle)          // wires `/form` + ui_submit ack
+await bridle.start()
+```
+
+That's enough to make any Bridle-connected embed page render the plan-picker form when the visitor sends `/form`. Below is the same code expanded inline if you want to write your own variants.
+
 ## Agent code
 
 Build the form on the runtime side and emit it as one of the `parts[]` of an assistant message:
