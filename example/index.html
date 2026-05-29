@@ -370,8 +370,10 @@ bridle.onMessage(async (msg) =&gt; {
               title: 'Auth via token()',
               token: async () => {
                 const r = await fetch('/embed/token?sub=demo-authn');
+                console.log('r', r)
                 if (!r.ok) throw new Error(`token ${r.status}`);
                 const { token } = await r.json();
+                console.log('token', token)
                 return token;
               },
               onReady: () => console.log('[bridle] authn ready'),

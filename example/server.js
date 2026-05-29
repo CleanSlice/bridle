@@ -87,6 +87,7 @@ const server = createServer(async (req, res) => {
     // The page does a single fetch on load and gets everything it needs to
     // mount the SDK — keeps `index.html` static (no env templating).
     if (req.method === 'GET' && req.url?.startsWith('/embed/token')) {
+      console.log('RANCH_API_KEY', RANCH_API_KEY)
       if (!RANCH_API_KEY) {
         return sendJson(res, 500, { error: 'RANCH_API_KEY is not set on the server' })
       }

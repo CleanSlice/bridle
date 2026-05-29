@@ -72,6 +72,12 @@ export class BridleClient {
     const url = this.opts.apiUrl.replace(/\/$/, '')
 
     const prompt = this.opts.prompt?.trim()
+    // Stable anonymous identity for token-less public embeds. Sent on every
+    // (re)connect so the hub reuses the same `anon-<id>` channel instead of
+    // minting a fresh random one each time — which would lose the visitor's
+    // transcript on every reconnect/reload. Ignored by the hub when a token
+    // is present.
+    const anonId = stableAnonId(this.opts.agentId)
     // What this client can render. The hub forwards the list to the agent
     // on every message — runtimes use it to skip part types this peer
     // can't display (e.g. don't emit `ui` parts to a Telegram client).
@@ -84,6 +90,7 @@ export class BridleClient {
         token,
         agentId: this.opts.agentId,
         capabilities,
+        ...(anonId ? { anonId } : {}),
         ...(prompt ? { prompt } : {}),
       },
     })
@@ -182,4 +189,28 @@ function randomId(): string {
   const c = (globalThis as unknown as { crypto?: Crypto }).crypto
   if (c?.randomUUID) return c.randomUUID()
   return 'bridle-' + Math.random().toString(36).slice(2) + Date.now().toString(36)
+}
+
+/**
+ * Stable anonymous id for token-less public embeds, persisted per agent in
+ * localStorage so the same visitor keeps the same transcript channel across
+ * reconnects AND page reloads. Returns `undefined` when storage is
+ * unavailable (privacy mode, SSR) — the hub then mints an ephemeral id, i.e.
+ * the old behavior, so nothing breaks. The value is opaque and unguessable;
+ * the hub namespaces it under `anon-` and sanitizes it before use.
+ */
+function stableAnonId(agentId: string): string | undefined {
+  const key = `bridle:anon:${agentId}`
+  try {
+    const ls = (globalThis as unknown as { localStorage?: Storage }).localStorage
+    if (!ls) return undefined
+    let id = ls.getItem(key)
+    if (!id) {
+      id = randomId()
+      ls.setItem(key, id)
+    }
+    return id
+  } catch {
+    return undefined
+  }
 }
