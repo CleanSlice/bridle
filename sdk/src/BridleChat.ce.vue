@@ -187,6 +187,13 @@ let client: BridleClient | null = null
 // messages, triggers loadTranscript() for the OLD clientId, and the merge
 // re-populates the freshly cleared list with the previous conversation.
 let connectGen = 0
+// One-shot: when the user picks "New chat" we still reconnect, but on the
+// next welcome we must NOT replay the transcript — otherwise on token-flow
+// (where clientId is fixed by JWT sub) the same server-side transcript
+// would load straight back into the freshly cleared list. Public flow with
+// a stable anonId would have the same problem; the only honest way to
+// break continuity from the client is to skip the next replay.
+let skipNextTranscript = false
 
 const host = useHost()
 const resolvedColorMode = ref<'light' | 'dark'>('light')
@@ -293,6 +300,12 @@ async function connect(): Promise<void> {
     // the runtime persists the transcript at `bridle:<clientId>.jsonl`.
     // Replay it so the chat survives a page refresh — live messages keep
     // flowing through the socket while this fetch runs.
+    if (skipNextTranscript) {
+      // "New chat" path: consume the flag and skip exactly one replay.
+      // Subsequent reloads/reconnects keep the usual continuity.
+      skipNextTranscript = false
+      return
+    }
     void loadTranscript(clientId, gen)
   })
   client.on('typing', () => {
@@ -788,6 +801,12 @@ async function startNewChat(): Promise<void> {
   greetingShown.value = false
   isTyping.value = false
   connectionError.value = null
+  // Tell the next welcome handler to skip its transcript replay. Server-
+  // side history isn't purged (no hub endpoint for that), but suppressing
+  // the replay is what the user actually wanted from "New chat" — a
+  // visibly fresh conversation. Continuity on subsequent reloads is
+  // preserved unless they hit New chat again.
+  skipNextTranscript = true
   if (props.apiUrl && props.agentId) {
     await connect()
   }
