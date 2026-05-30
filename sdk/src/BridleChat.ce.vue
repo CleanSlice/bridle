@@ -181,6 +181,12 @@ interface IUiFormState {
 const uiState = ref<Record<string, IUiFormState>>({})
 
 let client: BridleClient | null = null
+// Bumped on every connect() so welcome / transcript callbacks from a stale
+// socket can detect they're outdated and bail. Without this, "New chat"
+// would race: the old socket's welcome event arrives just after we clear
+// messages, triggers loadTranscript() for the OLD clientId, and the merge
+// re-populates the freshly cleared list with the previous conversation.
+let connectGen = 0
 
 const host = useHost()
 const resolvedColorMode = ref<'light' | 'dark'>('light')
@@ -259,46 +265,60 @@ function buildClient(): BridleClient {
 
 async function connect(): Promise<void> {
   client?.disconnect()
+  // Capture the generation that "owns" this socket. Every callback below
+  // checks it before touching shared state — a stale socket can keep
+  // firing events for a tick after disconnect(), and the welcome handler
+  // in particular would otherwise resurrect the old transcript right
+  // after "New chat" clears it.
+  const gen = ++connectGen
   client = buildClient()
   client.on('open', () => {
+    if (gen !== connectGen) return
     isConnected.value = true
     connectionError.value = null
     emit('ready')
   })
   client.on('close', () => {
+    if (gen !== connectGen) return
     isConnected.value = false
   })
   client.on('error', (err) => {
+    if (gen !== connectGen) return
     connectionError.value = err
     emit('error', err)
   })
   client.on('welcome', ({ clientId }) => {
+    if (gen !== connectGen) return
     // Hub assigns clientId from JWT sub (or 'admin' for admin tokens) and
     // the runtime persists the transcript at `bridle:<clientId>.jsonl`.
     // Replay it so the chat survives a page refresh — live messages keep
     // flowing through the socket while this fetch runs.
-    void loadTranscript(clientId)
+    void loadTranscript(clientId, gen)
   })
   client.on('typing', () => {
+    if (gen !== connectGen) return
     isTyping.value = true
   })
   client.on('message', (m) => {
+    if (gen !== connectGen) return
     isTyping.value = false
     upsert(m)
     emit('message', m)
   })
   client.on('stream', (m) => {
+    if (gen !== connectGen) return
     isTyping.value = false
     upsert(m)
   })
   client.on('stream_end', (m) => {
+    if (gen !== connectGen) return
     upsert(m)
     emit('message', m)
   })
   await client.connect()
 }
 
-async function loadTranscript(channel: string): Promise<void> {
+async function loadTranscript(channel: string, gen: number): Promise<void> {
   if (!channel) return
   try {
     const url =
@@ -309,6 +329,10 @@ async function loadTranscript(channel: string): Promise<void> {
     if (props.token) headers.Authorization = `Bearer ${props.token}`
     const res = await fetch(url, { headers })
     if (!res.ok) return
+    // Bail if a newer connect() has started while this fetch was in
+    // flight — the channel is stale and merging would re-populate a
+    // freshly cleared transcript (the "New chat" race).
+    if (gen !== connectGen) return
     type ApiMessage = {
       id: string
       role: 'user' | 'assistant'
@@ -320,6 +344,7 @@ async function loadTranscript(channel: string): Promise<void> {
       | null
     const items: ApiMessage[] = body?.data?.messages ?? body?.messages ?? []
     if (items.length === 0) return
+    if (gen !== connectGen) return
     // Merge transcript with whatever is already on screen — live wins on
     // id collisions (the agent may have already re-sent a tail message
     // by the time this fetch resolves). Order by `ts` so insertion is
