@@ -164,6 +164,8 @@ const dragCounter = ref(0)
 const scrollEl = ref<HTMLElement | null>(null)
 const inputEl = ref<HTMLTextAreaElement | null>(null)
 const fileInputEl = ref<HTMLInputElement | null>(null)
+const menuOpen = ref(false)
+const menuEl = ref<HTMLElement | null>(null)
 // One-shot guard so we don't show the greeting twice (open/close/open) or
 // fire while a transcript replay is still racing in from the hub.
 const greetingShown = ref(false)
@@ -735,6 +737,57 @@ function toggle(): void {
   emit(isOpen.value ? 'open' : 'close')
 }
 
+function toggleMenu(): void {
+  menuOpen.value = !menuOpen.value
+}
+
+/**
+ * Start a fresh conversation: wipe the persisted anon channel, clear the
+ * local transcript, and reconnect so the hub mints a brand-new clientId.
+ * The old anon channel stays on the hub but this visitor never sees it
+ * again — same effect as opening the page from a private window.
+ */
+async function startNewChat(): Promise<void> {
+  menuOpen.value = false
+  if (typeof window !== 'undefined') {
+    try {
+      window.localStorage.removeItem(`bridle:anon:${props.agentId}`)
+    } catch {
+      // Storage may be disabled (privacy mode) — proceed anyway. The hub
+      // mints an ephemeral id in that case; either way the user gets a
+      // fresh channel.
+    }
+  }
+  cancelGreetingTimer()
+  messages.value = []
+  greetingShown.value = false
+  isTyping.value = false
+  connectionError.value = null
+  if (props.apiUrl && props.agentId) {
+    await connect()
+  }
+}
+
+// Close the dropdown on outside click / Escape. `composedPath()` is the
+// only reliable way to see into the shadow DOM from a document-level
+// listener; without it, every event reports the host element as target
+// and the menu would never close.
+function onDocClick(e: MouseEvent): void {
+  if (!menuOpen.value) return
+  const root = menuEl.value
+  if (!root) return
+  const path = (e as Event).composedPath?.() ?? []
+  if (!path.includes(root)) {
+    menuOpen.value = false
+  }
+}
+
+function onDocKeydown(e: KeyboardEvent): void {
+  if (e.key === 'Escape' && menuOpen.value) {
+    menuOpen.value = false
+  }
+}
+
 function autoSize(e: Event): void {
   const t = e.target as HTMLTextAreaElement
   t.style.height = 'auto'
@@ -794,6 +847,10 @@ watch(
 onMounted(async () => {
   applyColorMode()
   bindAutoColorMode()
+  if (typeof document !== 'undefined') {
+    document.addEventListener('click', onDocClick)
+    document.addEventListener('keydown', onDocKeydown)
+  }
   if (!props.apiUrl || !props.agentId) return
   await connect()
 })
@@ -801,6 +858,10 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   unbindAutoColorMode()
   cancelGreetingTimer()
+  if (typeof document !== 'undefined') {
+    document.removeEventListener('click', onDocClick)
+    document.removeEventListener('keydown', onDocKeydown)
+  }
   client?.disconnect()
   client = null
 })
@@ -866,6 +927,45 @@ defineExpose({
           :title="isConnected ? 'Connected' : 'Disconnected'"
           aria-hidden="true"
         >●</span>
+        <div ref="menuEl" class="bridle__menu">
+          <button
+            type="button"
+            class="bridle__menu-trigger"
+            aria-label="Chat menu"
+            :aria-expanded="menuOpen"
+            aria-haspopup="menu"
+            @click="toggleMenu"
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+              <circle cx="12" cy="5" r="1.6" fill="currentColor" />
+              <circle cx="12" cy="12" r="1.6" fill="currentColor" />
+              <circle cx="12" cy="19" r="1.6" fill="currentColor" />
+            </svg>
+          </button>
+          <div
+            v-show="menuOpen"
+            class="bridle__menu-dropdown"
+            role="menu"
+          >
+            <button
+              type="button"
+              class="bridle__menu-item"
+              role="menuitem"
+              @click="startNewChat"
+            >
+              <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+                <path
+                  d="M12 5v14M5 12h14"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                />
+              </svg>
+              New chat
+            </button>
+          </div>
+        </div>
         <button
           v-if="mode === 'floating'"
           type="button"
@@ -1411,6 +1511,65 @@ defineExpose({
   border-radius: 4px;
 }
 .bridle__close:hover { background: var(--bridle-bubble-bg); }
+
+/* ---- Header overflow menu (3-dot) ---- */
+.bridle__menu {
+  position: relative;
+  flex-shrink: 0;
+}
+.bridle__menu-trigger {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  color: var(--bridle-muted);
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.bridle__menu-trigger:hover {
+  background: var(--bridle-bubble-bg);
+  color: var(--bridle-fg);
+}
+.bridle__menu-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 140px;
+  padding: 4px;
+  background: var(--bridle-bg);
+  border: 1px solid var(--bridle-border);
+  border-radius: 8px;
+  box-shadow: var(--bridle-shadow);
+  display: flex;
+  flex-direction: column;
+  z-index: 10;
+}
+.bridle__menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--bridle-fg);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.bridle__menu-item:hover {
+  background: var(--bridle-bubble-bg);
+}
+.bridle__menu-item svg {
+  color: var(--bridle-muted);
+  flex-shrink: 0;
+}
 
 .bridle__banner {
   font-size: 12px;
