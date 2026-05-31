@@ -787,6 +787,28 @@ function toggleMenu(): void {
  */
 async function startNewChat(): Promise<void> {
   menuOpen.value = false
+  // Ask the hub to archive the current transcript before we reconnect —
+  // best-effort: if the endpoint isn't there (older hub) or the request
+  // fails, we still clear locally so the visitor's UI is consistent.
+  // Server-side hubs that don't override IBridleTranscriptGateway.archive
+  // fall back to delete(); Ranch's controller moves the live JSONL to a
+  // timestamped sibling so admins still have the conversation.
+  const channel = client?.getClientId?.()
+  if (channel && props.apiUrl && props.agentId) {
+    try {
+      const url =
+        `${props.apiUrl.replace(/\/$/, '')}` +
+        `/api/agent/${encodeURIComponent(props.agentId)}/transcript/archive` +
+        `?channel=${encodeURIComponent(channel)}`
+      const headers: Record<string, string> = {}
+      if (typeof props.token === 'string' && props.token) {
+        headers.Authorization = `Bearer ${props.token}`
+      }
+      await fetch(url, { method: 'POST', headers })
+    } catch (err) {
+      console.warn('[bridle] transcript archive failed (continuing):', err)
+    }
+  }
   if (typeof window !== 'undefined') {
     try {
       window.localStorage.removeItem(`bridle:anon:${props.agentId}`)
@@ -801,11 +823,9 @@ async function startNewChat(): Promise<void> {
   greetingShown.value = false
   isTyping.value = false
   connectionError.value = null
-  // Tell the next welcome handler to skip its transcript replay. Server-
-  // side history isn't purged (no hub endpoint for that), but suppressing
-  // the replay is what the user actually wanted from "New chat" — a
-  // visibly fresh conversation. Continuity on subsequent reloads is
-  // preserved unless they hit New chat again.
+  // Suppress the next transcript replay too — belt-and-braces in case the
+  // archive endpoint was a no-op (older hub without the override) and the
+  // live transcript wasn't actually moved.
   skipNextTranscript = true
   if (props.apiUrl && props.agentId) {
     await connect()

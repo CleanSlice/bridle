@@ -37,4 +37,22 @@ export abstract class IBridleTranscriptGateway {
    * succeed when nothing exists.
    */
   abstract delete(agentId: string, channel: string): Promise<void>
+
+  /**
+   * Move the transcript for `(agentId, channel)` aside so subsequent
+   * `read()` calls return an empty list, without losing the data — used
+   * by the embed's "New chat" action when the visitor wants a fresh
+   * conversation but the integrator wants to keep the history for
+   * admin/audit. Implementations typically rename the live file with
+   * a timestamp suffix (e.g. `bridle:<channel>.<iso-ts>.archived.jsonl`)
+   * and return that path. Returning `{}` is fine when nothing was
+   * there to archive in the first place.
+   *
+   * Default implementation falls back to `delete()` — integrators can
+   * upgrade by overriding this method.
+   */
+  async archive(agentId: string, channel: string): Promise<{ archivedPath?: string }> {
+    await this.delete(agentId, channel)
+    return {}
+  }
 }

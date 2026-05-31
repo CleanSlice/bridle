@@ -137,4 +137,26 @@ export class BridleController {
       this.logger.warn(`Transcript reset failed for ${agentId}/${channel}: ${(err as Error).message}`)
     }
   }
+
+  @ApiOperation({
+    description:
+      'Archive the persisted chat transcript for an agent/channel. Used by the embed\'s "New chat" action when the integrator wants the visitor to see a clean slate but still keep the prior conversation for admin/audit. Default integrator binding falls back to delete; override IBridleTranscriptGateway.archive() to move-with-timestamp instead.',
+    operationId: 'archiveBridleTranscript',
+  })
+  @ApiQuery({ name: 'channel', required: false, description: 'Session channel — defaults to "admin".' })
+  @FlatResponse()
+  @Post(':agentId/transcript/archive')
+  @HttpCode(200)
+  async archiveTranscript(
+    @Param('agentId') agentId: string,
+    @Query('channel') channelRaw?: string,
+  ): Promise<{ archivedPath?: string }> {
+    const channel = (channelRaw ?? 'admin').trim() || 'admin'
+    try {
+      return await this.transcripts.archive(agentId, channel)
+    } catch (err) {
+      this.logger.warn(`Transcript archive failed for ${agentId}/${channel}: ${(err as Error).message}`)
+      return {}
+    }
+  }
 }
