@@ -772,7 +772,8 @@ function maybeShowGreeting(): void {
 
 function toggle(): void {
   isOpen.value = !isOpen.value
-  emit(isOpen.value ? 'open' : 'close')
+  if (isOpen.value) emit('open')
+  else emit('close')
 }
 
 function toggleMenu(): void {
@@ -1159,7 +1160,7 @@ defineExpose({
                   <textarea
                     class="bridle__ui-textarea"
                     rows="3"
-                    :value="ensureUiState(p).values[c.name]"
+                    :value="String(ensureUiState(p).values[c.name] ?? '')"
                     :placeholder="c.placeholder"
                     :required="c.required"
                     :disabled="ensureUiState(p).submitted"
@@ -1274,7 +1275,7 @@ defineExpose({
               />
             </div>
             <div
-              v-for="(p, i) in uiSubmitParts(m)"
+              v-for="(_, i) in uiSubmitParts(m)"
               :key="`sub-${i}`"
               class="bridle__ui-summary"
             >
