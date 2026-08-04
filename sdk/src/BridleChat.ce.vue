@@ -794,6 +794,9 @@ function maybeShowPopup(): void {
   popupTimer = setTimeout(() => {
     popupTimer = null
     if (isOpen.value) return
+    // Re-check the flag at fire time — another instance with the same
+    // agentId (or another tab) may have dismissed while we waited.
+    if (isPopupDismissed()) return
     popupVisible.value = true
   }, delay)
 }
@@ -991,11 +994,18 @@ watch(
 
 // Opening the chat by ANY path (FAB, defaultOpen, programmatic open())
 // counts as engagement: hide the teaser and remember the dismissal.
-watch(isOpen, (open) => {
-  if (!open) return
-  if (!props.popup?.trim()) return
-  dismissPopup()
-})
+// `immediate` covers defaultOpen, whose initial open never fires a lazy
+// watcher; the mode guard keeps inline widgets from writing the flag.
+watch(
+  isOpen,
+  (open) => {
+    if (!open) return
+    if (props.mode !== 'floating') return
+    if (!props.popup?.trim()) return
+    dismissPopup()
+  },
+  { immediate: true },
+)
 
 onMounted(async () => {
   applyColorMode()

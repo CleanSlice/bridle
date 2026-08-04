@@ -74,8 +74,8 @@ Omit `popup` to disable the teaser entirely. Clicking the card opens the
 chat; the ✕ button (or Escape) dismisses it. Either way the choice is
 remembered per agent in `localStorage` (`bridle:popup-dismissed:<agentId>`)
 and the teaser never re-appears for that visitor. Restyle it via
-`customCss` targeting `.bridle__popup`, `.bridle__popup-title`,
-`.bridle__popup-body`, `.bridle__popup-close`.
+`customCss` targeting `.bridle__popup`, `.bridle__popup-card`,
+`.bridle__popup-title`, `.bridle__popup-body`, `.bridle__popup-close`.
 
 ## Headless client (no UI)
 
