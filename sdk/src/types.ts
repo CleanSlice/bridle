@@ -178,6 +178,21 @@ export interface IBridleInitOptions {
    */
   greetingDelay?: number
   /**
+   * Text of the proactive teaser card shown above the closed floating FAB
+   * (auto-popup), inviting the visitor to chat. Markdown is supported.
+   * Absent/empty ⇒ the teaser is disabled. Floating mode only. Dismissing
+   * it (✕) or opening the chat is remembered per agent in localStorage
+   * (`bridle:popup-dismissed:<agentId>`) and the teaser never re-appears.
+   */
+  popup?: string
+  /** Bold headline above the `popup` text, e.g. "👋 Hi, I'm Assistant!". */
+  popupTitle?: string
+  /**
+   * Milliseconds after mount before the teaser appears. Default: 3000.
+   * Set to 0 to show immediately.
+   */
+  popupDelay?: number
+  /**
    * URL of an avatar image shown on the empty-state screen, above the
    * `emptyTitle`. Any URL the browser can render in `<img>` works.
    */

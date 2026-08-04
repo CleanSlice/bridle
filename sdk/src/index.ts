@@ -115,6 +115,11 @@ function init(opts: IBridleInitOptions): IBridleInstance {
   if (opts.greetingDelay !== undefined) {
     el.setAttribute('greeting-delay', String(opts.greetingDelay))
   }
+  if (opts.popup) el.setAttribute('popup', opts.popup)
+  if (opts.popupTitle) el.setAttribute('popup-title', opts.popupTitle)
+  if (opts.popupDelay !== undefined) {
+    el.setAttribute('popup-delay', String(opts.popupDelay))
+  }
   if (opts.emptyAvatar) el.setAttribute('empty-avatar', opts.emptyAvatar)
   if (opts.emptyTitle) el.setAttribute('empty-title', opts.emptyTitle)
   if (opts.emptySubtitle) el.setAttribute('empty-subtitle', opts.emptySubtitle)
@@ -226,6 +231,9 @@ function autoMount(): void {
     fabIcon: ds.fabIcon,
     greeting: ds.greeting,
     greetingDelay: ds.greetingDelay ? Number(ds.greetingDelay) : undefined,
+    popup: ds.popup,
+    popupTitle: ds.popupTitle,
+    popupDelay: ds.popupDelay ? Number(ds.popupDelay) : undefined,
     emptyAvatar: ds.emptyAvatar,
     emptyTitle: ds.emptyTitle,
     emptySubtitle: ds.emptySubtitle,

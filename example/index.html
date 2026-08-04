@@ -26,6 +26,7 @@
         </p>
         <p class="mx-auto mt-3 max-w-xl text-xs text-slate-500">
           Latest:
+          <code>data-popup</code> (v0.14.0) ·
           interactive forms — radio / checkbox / select (v0.12.0) ·
           empty-state suggestions (v0.11.0) ·
           <code>data-greeting</code> (v0.10.0) ·
@@ -62,6 +63,11 @@
   &lt;!-- v0.10.0: pre-seed the first bubble on an empty chat --&gt;
   data-greeting="Hi! Drop a screenshot or ask me anything."
   data-greeting-delay="2500"
+
+  &lt;!-- v0.14.0: proactive teaser above the closed bubble --&gt;
+  data-popup="Have a question? I can compare plans or book a demo."
+  data-popup-title="👋 Hi, I'm the Bridle assistant!"
+  data-popup-delay="2000"
 
   &lt;!-- v0.8.2: replace the default FAB glyph --&gt;
   data-fab-icon="/icons/chat.svg"
@@ -320,6 +326,11 @@ bridle.onMessage(async (msg) =&gt; {
           sdk.dataset.greeting =
             'Hi! Drop a screenshot or ask me anything.';
           sdk.dataset.greetingDelay = '2500';
+          // v0.14.0 — proactive teaser above the closed bubble
+          sdk.dataset.popup =
+            'Have a question? I can compare plans or book a demo.';
+          sdk.dataset.popupTitle = '👋 Hi, I\'m the Bridle assistant!';
+          sdk.dataset.popupDelay = '2000';
 
           sdk.onerror = () => setError('Failed to load /sdk/latest.js');
           sdk.onload = () => {
