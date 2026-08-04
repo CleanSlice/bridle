@@ -111,6 +111,20 @@ const props = withDefaults(
      */
     greetingDelay?: number | string
     /**
+     * Text of the proactive teaser card shown above the closed floating
+     * FAB (auto-popup). Markdown is supported. Empty/absent ⇒ disabled.
+     * Floating mode only. Dismissal (✕ or opening the chat) is remembered
+     * per agent in localStorage and the teaser never re-appears.
+     */
+    popup?: string
+    /** Bold headline above the `popup` text. */
+    popupTitle?: string
+    /**
+     * Milliseconds after mount before the teaser appears. Default: 3000.
+     * Attributes arrive as strings, hence `number | string`.
+     */
+    popupDelay?: number | string
+    /**
      * URL of an avatar image shown on the empty-state screen above the
      * empty-state title. Any `<img>`-renderable source — SVG, PNG, WEBP,
      * or `data:` URI.
@@ -170,6 +184,10 @@ const menuEl = ref<HTMLElement | null>(null)
 // fire while a transcript replay is still racing in from the hub.
 const greetingShown = ref(false)
 let greetingTimer: ReturnType<typeof setTimeout> | null = null
+// Pre-open teaser (auto-popup). Timer is one-shot; every exit path
+// (open, dismiss, unmount) cancels it so the card can't resurface.
+const popupVisible = ref(false)
+let popupTimer: ReturnType<typeof setTimeout> | null = null
 // Per-uiId form state keyed by the ui part's uiId. Multiple forms in one
 // message stay independent. `submitted` flips on send so we can disable
 // the form and freeze its values in the transcript.
@@ -729,6 +747,68 @@ function cancelGreetingTimer(): void {
   }
 }
 
+const POPUP_DISMISSED_PREFIX = 'bridle:popup-dismissed:'
+
+function isPopupDismissed(): boolean {
+  if (typeof window === 'undefined') return true
+  try {
+    return (
+      window.localStorage.getItem(POPUP_DISMISSED_PREFIX + props.agentId) === '1'
+    )
+  } catch {
+    // Storage disabled (privacy mode) — treat as not dismissed so the
+    // teaser still shows; we just can't remember the dismissal.
+    return false
+  }
+}
+
+function markPopupDismissed(): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(POPUP_DISMISSED_PREFIX + props.agentId, '1')
+  } catch {
+    // Best-effort — same convention as the `bridle:anon:` key.
+  }
+}
+
+function cancelPopupTimer(): void {
+  if (popupTimer) {
+    clearTimeout(popupTimer)
+    popupTimer = null
+  }
+}
+
+// Schedule the teaser once from onMounted. Floating mode only, closed
+// panel only, and never after a remembered dismissal.
+function maybeShowPopup(): void {
+  if (props.mode !== 'floating') return
+  if (isOpen.value) return
+  const text = props.popup?.trim()
+  if (!text) return
+  if (isPopupDismissed()) return
+
+  const raw =
+    typeof props.popupDelay === 'string' ? Number(props.popupDelay) : props.popupDelay
+  const delay = Number.isFinite(raw) && raw !== undefined ? Math.max(0, raw as number) : 3000
+
+  popupTimer = setTimeout(() => {
+    popupTimer = null
+    if (isOpen.value) return
+    popupVisible.value = true
+  }, delay)
+}
+
+function dismissPopup(): void {
+  cancelPopupTimer()
+  popupVisible.value = false
+  markPopupDismissed()
+}
+
+function onPopupClick(): void {
+  dismissPopup()
+  if (!isOpen.value) toggle()
+}
+
 // Triggered by the watcher whenever the panel is open + connected + empty.
 // Marks the flag immediately so re-fires (e.g. transcript arriving with
 // existing history) don't queue a second one. The actual bubble appears
@@ -848,9 +928,9 @@ function onDocClick(e: MouseEvent): void {
 }
 
 function onDocKeydown(e: KeyboardEvent): void {
-  if (e.key === 'Escape' && menuOpen.value) {
-    menuOpen.value = false
-  }
+  if (e.key !== 'Escape') return
+  if (menuOpen.value) menuOpen.value = false
+  if (popupVisible.value) dismissPopup()
 }
 
 function autoSize(e: Event): void {
@@ -909,6 +989,14 @@ watch(
   },
 )
 
+// Opening the chat by ANY path (FAB, defaultOpen, programmatic open())
+// counts as engagement: hide the teaser and remember the dismissal.
+watch(isOpen, (open) => {
+  if (!open) return
+  if (!props.popup?.trim()) return
+  dismissPopup()
+})
+
 onMounted(async () => {
   applyColorMode()
   bindAutoColorMode()
@@ -917,12 +1005,14 @@ onMounted(async () => {
     document.addEventListener('keydown', onDocKeydown)
   }
   if (!props.apiUrl || !props.agentId) return
+  maybeShowPopup()
   await connect()
 })
 
 onBeforeUnmount(() => {
   unbindAutoColorMode()
   cancelGreetingTimer()
+  cancelPopupTimer()
   if (typeof document !== 'undefined') {
     document.removeEventListener('click', onDocClick)
     document.removeEventListener('keydown', onDocKeydown)
@@ -947,6 +1037,32 @@ defineExpose({
 
 <template>
   <div :class="['bridle', `bridle--${mode}`, isOpen && 'bridle--open']">
+    <div
+      v-if="mode === 'floating' && popupVisible && !isOpen"
+      class="bridle__popup"
+      role="status"
+    >
+      <button
+        type="button"
+        class="bridle__popup-close"
+        aria-label="Dismiss"
+        @click.stop="dismissPopup"
+      >
+        ×
+      </button>
+      <div
+        class="bridle__popup-card"
+        role="button"
+        tabindex="0"
+        @click="onPopupClick"
+        @keydown.enter.prevent="onPopupClick"
+        @keydown.space.prevent="onPopupClick"
+      >
+        <div v-if="popupTitle" class="bridle__popup-title">{{ popupTitle }}</div>
+        <div class="bridle__popup-body" v-html="renderMarkdown(popup ?? '')" />
+      </div>
+    </div>
+
     <button
       v-if="mode === 'floating'"
       class="bridle__fab"
@@ -1506,6 +1622,61 @@ defineExpose({
   display: block;
   pointer-events: none;
 }
+
+/* ---- Pre-open teaser (auto-popup) ---- */
+.bridle__popup {
+  position: absolute;
+  bottom: 68px;
+  right: 0;
+  width: max-content;
+  max-width: min(300px, calc(100vw - 40px));
+  background: var(--bridle-bg-elv);
+  color: var(--bridle-fg);
+  border: 1px solid var(--bridle-border);
+  border-radius: var(--bridle-radius);
+  box-shadow: var(--bridle-shadow);
+  padding: 12px 14px;
+  animation: bridle-popup-in 0.25s ease-out both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .bridle__popup { animation: none; }
+}
+@keyframes bridle-popup-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.bridle__popup-card { cursor: pointer; }
+.bridle__popup-card:focus-visible {
+  outline: 2px solid var(--bridle-focus-ring);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+.bridle__popup-title {
+  font-weight: 600;
+  font-size: 14px;
+  padding-right: 20px;
+}
+.bridle__popup-body {
+  font-size: 13px;
+  color: var(--bridle-muted);
+}
+.bridle__popup-title + .bridle__popup-body { margin-top: 4px; }
+.bridle__popup-body :first-child { margin-top: 0; }
+.bridle__popup-body :last-child { margin-bottom: 0; }
+.bridle__popup-close {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  background: transparent;
+  border: 0;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--bridle-muted);
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.bridle__popup-close:hover { background: var(--bridle-bubble-bg); }
 
 .bridle__panel {
   position: absolute;
