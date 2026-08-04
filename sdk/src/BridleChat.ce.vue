@@ -1633,16 +1633,19 @@ defineExpose({
   pointer-events: none;
 }
 
-/* ---- Pre-open teaser (auto-popup) ---- */
+/* ---- Pre-open teaser (auto-popup) ----
+   Painted in the FAB's accent colors so the card and the bubble read as
+   one widget; every derived shade is mixed from --bridle-primary-fg so
+   custom themeVars keep the pair in sync automatically. */
 .bridle__popup {
   position: absolute;
   bottom: 68px;
   right: 0;
   width: max-content;
   max-width: min(300px, calc(100vw - 40px));
-  background: var(--bridle-bg-elv);
-  color: var(--bridle-fg);
-  border: 1px solid var(--bridle-border);
+  background: var(--bridle-primary);
+  color: var(--bridle-primary-fg);
+  border: 1px solid var(--bridle-primary);
   border-radius: var(--bridle-radius);
   box-shadow: var(--bridle-shadow);
   padding: 12px 14px;
@@ -1657,7 +1660,7 @@ defineExpose({
 }
 .bridle__popup-card { cursor: pointer; }
 .bridle__popup-card:focus-visible {
-  outline: 2px solid var(--bridle-focus-ring);
+  outline: 2px solid color-mix(in srgb, var(--bridle-primary-fg) 60%, transparent);
   outline-offset: 2px;
   border-radius: 6px;
 }
@@ -1668,8 +1671,9 @@ defineExpose({
 }
 .bridle__popup-body {
   font-size: 13px;
-  color: var(--bridle-muted);
+  color: color-mix(in srgb, var(--bridle-primary-fg) 85%, transparent);
 }
+.bridle__popup-body a { color: inherit; text-decoration: underline; }
 .bridle__popup-title + .bridle__popup-body { margin-top: 4px; }
 .bridle__popup-body :first-child { margin-top: 0; }
 .bridle__popup-body :last-child { margin-bottom: 0; }
@@ -1682,11 +1686,13 @@ defineExpose({
   font-size: 18px;
   line-height: 1;
   cursor: pointer;
-  color: var(--bridle-muted);
+  color: color-mix(in srgb, var(--bridle-primary-fg) 75%, transparent);
   padding: 2px 4px;
   border-radius: 4px;
 }
-.bridle__popup-close:hover { background: var(--bridle-bubble-bg); }
+.bridle__popup-close:hover {
+  background: color-mix(in srgb, var(--bridle-primary-fg) 18%, transparent);
+}
 
 .bridle__panel {
   position: absolute;
