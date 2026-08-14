@@ -119,3 +119,50 @@ Treat all three (`stream`, `stream_end`, `message`) as the same kind of update �
 ```
 
 This means the same client code that handles `parts[]` for non-streaming messages works for streams too — no special-casing.
+
+## Thinking events
+
+While the agent works with tools between text outputs, the chat would otherwise sit silent. Two mechanisms cover that window:
+
+1. **Early `typing`.** The runtime emits `typing` at turn start and again before each tool batch — every client (including older SDKs) shows its thinking indicator through the whole generation, not just the final response.
+2. **`thinking` events** — a live, Rovo-style timeline of what the agent is doing, rendered by capable clients as named, expandable steps above the incoming answer.
+
+```
+thinking  { clientId, turnId, step: { id, label, detail?, state }, ts }   // step update
+thinking  { clientId, turnId, done: true, ts }                            // turn complete
+```
+
+- `turnId` groups every event of one agent turn (minted per run).
+- `step.state` is `'active'` before the work starts and `'done'` (same `step.id`, updated in place) when it finishes.
+- `step.label` is a humanized, visitor-safe name (e.g. `"Search knowledge base"`); `step.detail` is optional reasoning prose (markdown). **Never put raw tool params or prompts here** — unlike `debug`, this event is relayed to regular visitors, not admin-gated.
+- The terminal `done: true` event closes the timeline; the widget collapses the block into a re-expandable summary row.
+
+### Capability gating
+
+The SDK (≥ v0.15.0) advertises `'thinking'` in its handshake `capabilities`. The hub forwards the list on every message, and the runtime emits `thinking` events **only** when the triggering message carried the capability. Telegram clients and older SDKs receive nothing new.
+
+### Compatibility matrix
+
+| SDK | Hub | Runtime | Behavior |
+|-----|-----|---------|----------|
+| old | any | new | indicator appears at turn start (early `typing`) — strict improvement |
+| new | old | new | shimmer status only; the old hub's whitelist silently drops `thinking` |
+| new | new | old | behavior unchanged from before |
+| new | new | new | full thinking timeline |
+
+Every partial deployment state is safe — the event is strictly additive. Recommended rollout order: hub → runtime → SDK.
+
+### Emitting from an agent
+
+```ts
+const turnId = crypto.randomUUID()
+const step = { id: crypto.randomUUID(), label: 'Search knowledge base' }
+
+bridle.sendThinking(msg.from, turnId, { ...step, state: 'active' })
+// ... do the work ...
+bridle.sendThinking(msg.from, turnId, { ...step, state: 'done' })
+// ... when the whole turn is finished:
+bridle.sendThinking(msg.from, turnId)          // no step ⇒ done: true
+```
+
+Gate on `msg.capabilities?.includes('thinking')` before emitting.
