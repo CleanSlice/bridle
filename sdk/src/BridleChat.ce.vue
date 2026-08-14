@@ -169,6 +169,28 @@ const emit = defineEmits<{
 const messages = ref<IBridleMessage[]>([])
 const isConnected = ref(false)
 const isTyping = ref(false)
+// Watchdog for the shimmering thinking status: a cancelled runtime turn
+// breaks its loop without ever emitting stream_end/message, so without a
+// timeout the shimmer would animate forever. Every typing/stream event
+// re-arms it; clearing the status disarms it.
+const THINKING_STALE_MS = 75_000
+let thinkingStaleTimer: ReturnType<typeof setTimeout> | null = null
+
+function setTyping(on: boolean): void {
+  isTyping.value = on
+  if (thinkingStaleTimer) {
+    clearTimeout(thinkingStaleTimer)
+    thinkingStaleTimer = null
+  }
+  if (on) {
+    thinkingStaleTimer = setTimeout(() => {
+      thinkingStaleTimer = null
+      isTyping.value = false
+    }, THINKING_STALE_MS)
+  }
+}
+
+const thinkingLabel = computed(() => `${props.title} is thinking…`)
 const connectionError = ref<BridleAuthError | Error | null>(null)
 const isOpen = ref(props.mode === 'inline' || coerceBool(props.defaultOpen))
 const draft = ref('')
@@ -306,6 +328,8 @@ async function connect(): Promise<void> {
   client.on('close', () => {
     if (gen !== connectGen) return
     isConnected.value = false
+    // Connection gone — nothing can finish this turn, stop the shimmer.
+    setTyping(false)
   })
   client.on('error', (err) => {
     if (gen !== connectGen) return
@@ -328,17 +352,17 @@ async function connect(): Promise<void> {
   })
   client.on('typing', () => {
     if (gen !== connectGen) return
-    isTyping.value = true
+    setTyping(true)
   })
   client.on('message', (m) => {
     if (gen !== connectGen) return
-    isTyping.value = false
+    setTyping(false)
     upsert(m)
     emit('message', m)
   })
   client.on('stream', (m) => {
     if (gen !== connectGen) return
-    isTyping.value = false
+    setTyping(false)
     upsert(m)
   })
   client.on('stream_end', (m) => {
@@ -418,7 +442,7 @@ function send(): void {
     parts,
     ts: Date.now(),
   })
-  isTyping.value = true
+  setTyping(true)
   client.send(text, parts)
   draft.value = ''
   attachments.value = []
@@ -829,7 +853,7 @@ function maybeShowGreeting(): void {
   }
 
   greetingShown.value = true
-  isTyping.value = true
+  setTyping(true)
 
   const raw =
     typeof props.greetingDelay === 'string'
@@ -839,7 +863,7 @@ function maybeShowGreeting(): void {
 
   greetingTimer = setTimeout(() => {
     greetingTimer = null
-    isTyping.value = false
+    setTyping(false)
     // User snuck a message in during the delay — drop the greeting so we
     // don't shove it above their first turn.
     if (messages.value.length > 0) return
@@ -905,7 +929,7 @@ async function startNewChat(): Promise<void> {
   cancelGreetingTimer()
   messages.value = []
   greetingShown.value = false
-  isTyping.value = false
+  setTyping(false)
   connectionError.value = null
   // Suppress the next transcript replay too — belt-and-braces in case the
   // archive endpoint was a no-op (older hub without the override) and the
@@ -1023,6 +1047,7 @@ onBeforeUnmount(() => {
   unbindAutoColorMode()
   cancelGreetingTimer()
   cancelPopupTimer()
+  setTyping(false)
   if (typeof document !== 'undefined') {
     document.removeEventListener('click', onDocClick)
     document.removeEventListener('keydown', onDocKeydown)
@@ -1411,8 +1436,15 @@ defineExpose({
             <span v-if="m.text && uiSubmitParts(m).length === 0" class="bridle__msg-text">{{ m.text }}</span>
           </div>
         </div>
-        <div v-if="isTyping" class="bridle__typing" aria-label="Agent is typing">
-          <span /><span /><span />
+        <div
+          v-if="isTyping"
+          class="bridle__thinking"
+          role="status"
+          :aria-label="thinkingLabel"
+        >
+          <div class="bridle__thinking-header">
+            <span class="bridle__thinking-status">{{ thinkingLabel }}</span>
+          </div>
         </div>
       </div>
 
@@ -2052,28 +2084,55 @@ defineExpose({
   background: rgba(255, 255, 255, 0.08);
 }
 
-.bridle__typing {
+/* ── Thinking status (Rovo-style shimmer) ─────────────────────────────
+   The status text carries a traveling light sweep: a gradient clipped to
+   the glyphs, animated across. Solid `background` first so browsers that
+   reject the gradient/color-mix still render readable muted text. */
+.bridle__thinking {
   align-self: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 2px;
+  max-width: 100%;
+}
+.bridle__thinking-header {
   display: inline-flex;
-  gap: 4px;
-  padding: 10px 14px;
-  background: var(--bridle-bubble-bg);
-  border-radius: 14px;
-  border-bottom-left-radius: 4px;
+  align-items: center;
+  gap: 6px;
 }
-.bridle__typing span {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
+.bridle__thinking-status {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--bridle-muted);
   background: var(--bridle-muted);
-  animation: bridle-bounce 1.4s infinite ease-in-out;
+  background: linear-gradient(
+    90deg,
+    var(--bridle-muted) 0%,
+    var(--bridle-muted) 35%,
+    color-mix(in srgb, var(--bridle-muted) 30%, var(--bridle-bg)) 50%,
+    var(--bridle-muted) 65%,
+    var(--bridle-muted) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: bridle-shimmer 1.6s linear infinite;
 }
-.bridle__typing span:nth-child(2) { animation-delay: 0.15s; }
-.bridle__typing span:nth-child(3) { animation-delay: 0.3s; }
 
-@keyframes bridle-bounce {
-  0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
-  30% { opacity: 1; transform: translateY(-3px); }
+@keyframes bridle-shimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bridle__thinking-status {
+    animation: none;
+    background: none;
+    -webkit-text-fill-color: currentColor;
+    color: var(--bridle-muted);
+  }
 }
 
 .bridle__input {
