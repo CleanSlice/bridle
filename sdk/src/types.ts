@@ -85,6 +85,47 @@ export interface IBridleUiSubmitPart {
   values: Record<string, BridleUiValue>
 }
 
+// ── Thinking (live reasoning steps) ───────────────────────────
+// Agent → Browser while an answer is being prepared. Rendered as a
+// Rovo-style collapsible timeline above the incoming answer.
+
+/** One published unit of agent work inside a thinking timeline. */
+export interface IBridleThinkingStep {
+  /** Stable per-step id — the `done` update reuses the `active` event's id. */
+  id: string
+  /** Human-readable, visitor-safe step name (e.g. "Search knowledge base"). */
+  label: string
+  /** Optional visitor-safe reasoning prose (markdown). */
+  detail?: string
+  state: 'active' | 'done'
+}
+
+/**
+ * Wire event: a step update (`step` set) or turn completion (`done: true`).
+ * Only delivered to clients that advertised the `thinking` capability.
+ */
+export interface IBridleThinkingEvent {
+  type: 'thinking'
+  clientId: string
+  /** Groups every step of one agent turn. */
+  turnId: string
+  step?: IBridleThinkingStep
+  done?: boolean
+  ts: number
+}
+
+/**
+ * Client-side aggregate of one turn's thinking events. Session-only view
+ * state — never persisted, never replayed after a page reload.
+ */
+export interface IThinkingBlock {
+  turnId: string
+  steps: IBridleThinkingStep[]
+  status: 'thinking' | 'done'
+  /** Arrival time of the first event — anchors the block in the chat flow. */
+  ts: number
+}
+
 export interface IBridleMessage {
   id: string
   role: 'user' | 'assistant'

@@ -1,5 +1,5 @@
 import { io, type Socket } from 'socket.io-client'
-import type { BridlePart, IBridleMessage } from './types'
+import type { BridlePart, IBridleMessage, IBridleThinkingEvent } from './types'
 
 export interface IBridleClientOptions {
   apiUrl: string
@@ -20,7 +20,7 @@ export interface IBridleClientOptions {
   prompt?: string
 }
 
-type EventName = 'open' | 'close' | 'error' | 'typing' | 'message' | 'stream' | 'stream_end' | 'welcome'
+type EventName = 'open' | 'close' | 'error' | 'typing' | 'thinking' | 'message' | 'stream' | 'stream_end' | 'welcome'
 type Listener<T = unknown> = (payload: T) => void
 
 /**
@@ -81,7 +81,8 @@ export class BridleClient {
     // What this client can render. The hub forwards the list to the agent
     // on every message — runtimes use it to skip part types this peer
     // can't display (e.g. don't emit `ui` parts to a Telegram client).
-    const capabilities = ['streaming', 'images', 'files', 'ui']
+    // `thinking`: live reasoning-step events (SDK ≥ v0.15.0).
+    const capabilities = ['streaming', 'images', 'files', 'ui', 'thinking']
     const socket = io(`${url}/ws/client`, {
       transports: ['websocket'],
       reconnection: true,
@@ -110,6 +111,9 @@ export class BridleClient {
       this.fire('welcome', data)
     })
     socket.on('typing', () => this.fire('typing', undefined))
+    socket.on('thinking', (data: IBridleThinkingEvent) =>
+      this.fire('thinking', data),
+    )
     socket.on('message', (data: unknown) =>
       this.fire('message', toMessage(data, 'assistant')),
     )
@@ -138,6 +142,7 @@ export class BridleClient {
   on(event: 'open' | 'close' | 'typing', handler: () => void): void
   on(event: 'error', handler: (error: Error) => void): void
   on(event: 'welcome', handler: (data: { clientId: string }) => void): void
+  on(event: 'thinking', handler: (data: IBridleThinkingEvent) => void): void
   on(event: 'message' | 'stream' | 'stream_end', handler: (message: IBridleMessage) => void): void
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   on(event: EventName, handler: (...args: any[]) => void): void {

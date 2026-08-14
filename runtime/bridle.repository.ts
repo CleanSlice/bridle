@@ -159,6 +159,20 @@ export interface IBridleMessageData {
   capabilities?: string[]
 }
 
+// ── Thinking (live reasoning steps) ──────────────────────────
+
+/**
+ * One published unit of agent work inside a thinking timeline. Pass to
+ * `sendThinking()` — `active` before the work starts, `done` (same `id`)
+ * when it finishes. Labels/detail must be visitor-safe.
+ */
+export interface IBridleThinkingStep {
+  id: string
+  label: string
+  detail?: string
+  state: 'active' | 'done'
+}
+
 // ── Admin protocol — debug + sync ─────────────────────────────
 
 /**
@@ -267,6 +281,35 @@ export class BridleRepository implements IChannelGateway {
    */
   onSync(handler: SyncHandler): void {
     this.syncHandler = handler
+  }
+
+  /**
+   * Bare typing signal so the browser lights its thinking indicator before
+   * the first LLM byte (streamSend fires its own once streaming starts).
+   * No-op if the socket is offline.
+   */
+  sendTyping(to: string): void {
+    if (!this.socket?.connected) return
+    this.socket.emit('typing', { clientId: to, ts: Date.now() })
+  }
+
+  /**
+   * Publish one thinking-timeline update: a step (`state: 'active' | 'done'`)
+   * or, with `step` omitted, the terminal turn-completion event. Emit only
+   * toward clients whose message `capabilities` include `'thinking'` —
+   * others can't render it. Payload must stay visitor-safe: humanized step
+   * labels and reasoning prose only, never raw tool params or prompts.
+   * No-op if the socket is offline.
+   */
+  sendThinking(to: string, turnId: string, step?: IBridleThinkingStep): void {
+    if (!this.socket?.connected) return
+    this.socket.emit('thinking', {
+      type: 'thinking',
+      clientId: to,
+      turnId,
+      ...(step ? { step } : { done: true }),
+      ts: Date.now(),
+    })
   }
 
   /**
