@@ -178,11 +178,19 @@ const isTyping = ref(false)
 // frozen by the terminal `done` event (or the stale watchdog below).
 // Session-only view state — nothing here is persisted or replayed.
 const thinkingBlocks = ref<IThinkingBlock[]>([])
-// turnId → collapsed override. Unset means the default: open while
+// Turns terminally closed (done event / watchdog / socket close) —
+// straggler steps for these must not resurrect a segment.
+const closedTurns = new Set<string>()
+// segment key → collapsed override. Unset means the default: open while
 // thinking, collapsed once done (auto-collapse on completion).
 const collapsedBlocks = ref<Record<string, boolean>>({})
 // stepId → detail expanded. Steps arrive collapsed.
 const expandedSteps = ref<Record<string, boolean>>({})
+
+// A turn may span several segments (blocks) — turnId + seg identifies one.
+function blockKey(b: IThinkingBlock): string {
+  return `${b.turnId}#${b.seg}`
+}
 
 const hasOpenThinking = computed(() =>
   thinkingBlocks.value.some((b) => b.status === 'thinking'),
@@ -218,7 +226,7 @@ function setTyping(on: boolean): void {
     thinkingStaleTimer = setTimeout(() => {
       thinkingStaleTimer = null
       isTyping.value = false
-      freezeOpenThinking()
+      closeAllTurns()
     }, THINKING_STALE_MS)
   }
 }
@@ -226,11 +234,11 @@ function setTyping(on: boolean): void {
 const thinkingLabel = computed(() => `${props.title} is thinking…`)
 
 function isBlockCollapsed(b: IThinkingBlock): boolean {
-  return collapsedBlocks.value[b.turnId] ?? b.status === 'done'
+  return collapsedBlocks.value[blockKey(b)] ?? b.status === 'done'
 }
 
 function toggleBlock(b: IThinkingBlock): void {
-  collapsedBlocks.value[b.turnId] = !isBlockCollapsed(b)
+  collapsedBlocks.value[blockKey(b)] = !isBlockCollapsed(b)
 }
 
 function toggleStep(s: IBridleThinkingStep): void {
@@ -242,30 +250,70 @@ function freezeThinkingBlock(b: IThinkingBlock): void {
   b.steps = b.steps.map((s) => ({ ...s, state: 'done' as const }))
 }
 
+/**
+ * Seal (collapse) every open segment. The turns stay open — later steps of
+ * the same turn open a fresh segment below the newest message.
+ */
 function freezeOpenThinking(): void {
   for (const b of thinkingBlocks.value) {
     if (b.status === 'thinking') freezeThinkingBlock(b)
   }
 }
 
+/** Terminal paths (watchdog, socket close): seal segments AND close their
+ * turns so straggler steps can't resurrect a zombie segment. */
+function closeAllTurns(): void {
+  for (const b of thinkingBlocks.value) closedTurns.add(b.turnId)
+  freezeOpenThinking()
+}
+
+/**
+ * Assistant content landing below the open segment seals it — the next
+ * step opens a fresh segment under this message (the turn stays open).
+ */
+function sealThinkingBeforeNewBubble(m: IBridleMessage): void {
+  if (m.role !== 'assistant') return
+  if (!m.text || !m.text.trim()) return
+  if (messages.value.some((x) => x.id === m.id)) return // update, not new
+  freezeOpenThinking()
+}
+
 function clearThinking(): void {
   thinkingBlocks.value = []
+  closedTurns.clear()
   collapsedBlocks.value = {}
   expandedSteps.value = {}
 }
 
 function onThinkingEvent(e: IBridleThinkingEvent): void {
   if (!e?.turnId) return
-  let block = thinkingBlocks.value.find((x) => x.turnId === e.turnId)
+  const turnBlocks = thinkingBlocks.value.filter((x) => x.turnId === e.turnId)
   if (e.done || !e.step) {
-    // Terminal event — the turn is over, auto-collapse to the summary row.
-    if (block) freezeThinkingBlock(block)
+    // Terminal event — freeze every segment and refuse stragglers.
+    for (const b of turnBlocks) freezeThinkingBlock(b)
+    closedTurns.add(e.turnId)
     return
   }
-  if (block?.status === 'done') return // straggler after the block froze
-  if (!block) {
-    // Linear conversation: a new turn's first step closes any previous block.
-    freezeOpenThinking()
+  if (closedTurns.has(e.turnId)) return // straggler after terminal
+  // `done` updates land in whichever segment holds the step id — the
+  // segment may have sealed while the tool was still running.
+  const owner = turnBlocks.find((b) => b.steps.some((s) => s.id === e.step!.id))
+  if (owner) {
+    owner.steps = owner.steps.map((s) => (s.id === e.step!.id ? e.step! : s))
+    setTyping(true)
+    return
+  }
+  // New step: continue the trailing open segment, or open a fresh one
+  // below the newest message (segments seal when content lands).
+  let block = turnBlocks[turnBlocks.length - 1]
+  if (!block || block.status === 'done') {
+    // Linear conversation: a new turn's first step closes other turns.
+    for (const b of thinkingBlocks.value) {
+      if (b.turnId !== e.turnId && b.status === 'thinking') {
+        freezeThinkingBlock(b)
+        closedTurns.add(b.turnId)
+      }
+    }
     // Anchor after every message already on screen — wire timestamps come
     // from the agent's clock and could otherwise sort above the user's
     // message on skewed clocks.
@@ -274,15 +322,14 @@ function onThinkingEvent(e: IBridleThinkingEvent): void {
       : 0
     block = {
       turnId: e.turnId,
+      seg: turnBlocks.length,
       steps: [],
       status: 'thinking',
       ts: Math.max(e.ts ?? Date.now(), lastTs + 1),
     }
     thinkingBlocks.value.push(block)
   }
-  const idx = block.steps.findIndex((s) => s.id === e.step!.id)
-  if (idx >= 0) block.steps[idx] = e.step
-  else block.steps.push(e.step)
+  block.steps.push(e.step)
   // Steps mean the agent is actively working — keep the status shimmer on
   // through tool execution and re-arm the stale watchdog.
   setTyping(true)
@@ -426,7 +473,7 @@ async function connect(): Promise<void> {
     isConnected.value = false
     // Connection gone — nothing can finish this turn, stop the shimmer
     // and settle any open timeline into its frozen state.
-    freezeOpenThinking()
+    closeAllTurns()
     setTyping(false)
   })
   client.on('error', (err) => {
@@ -459,12 +506,14 @@ async function connect(): Promise<void> {
   client.on('message', (m) => {
     if (gen !== connectGen) return
     setTyping(false)
+    sealThinkingBeforeNewBubble(m)
     upsert(m)
     emit('message', m)
   })
   client.on('stream', (m) => {
     if (gen !== connectGen) return
     setTyping(false)
+    sealThinkingBeforeNewBubble(m)
     upsert(m)
   })
   client.on('stream_end', (m) => {
@@ -1079,8 +1128,13 @@ function onKeydown(e: KeyboardEvent): void {
 watch(
   [messages, isTyping, thinkingBlocks],
   async () => {
+    // Capture BEFORE the DOM grows: follow only a reader who was already at
+    // the bottom — never yank back someone who scrolled up to re-read.
+    const el = scrollEl.value
+    const nearBottom =
+      !el || el.scrollHeight - el.scrollTop - el.clientHeight < 80
     await nextTick()
-    if (scrollEl.value) {
+    if (nearBottom && scrollEl.value) {
       scrollEl.value.scrollTop = scrollEl.value.scrollHeight
     }
   },
@@ -1359,7 +1413,7 @@ defineExpose({
         </div>
         <template
           v-for="{ message: m, block: b } in chatItems"
-          :key="m ? m.id : (b?.turnId ?? '')"
+          :key="m ? m.id : (b ? blockKey(b) : '')"
         >
         <div
           v-if="m"

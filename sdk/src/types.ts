@@ -115,14 +115,19 @@ export interface IBridleThinkingEvent {
 }
 
 /**
- * Client-side aggregate of one turn's thinking events. Session-only view
- * state — never persisted, never replayed after a page reload.
+ * One SEGMENT of a turn's thinking timeline. A turn may produce several
+ * segments: a segment seals (collapses) as soon as assistant content lands
+ * below it, and the next step opens a fresh segment under that message —
+ * so the current activity always renders at the bottom of the flow.
+ * Session-only view state — never persisted or replayed after a reload.
  */
 export interface IThinkingBlock {
   turnId: string
+  /** Segment ordinal within the turn — with turnId forms the render key. */
+  seg: number
   steps: IBridleThinkingStep[]
   status: 'thinking' | 'done'
-  /** Arrival time of the first event — anchors the block in the chat flow. */
+  /** Arrival time of the first event — anchors the segment in the chat flow. */
   ts: number
 }
 
