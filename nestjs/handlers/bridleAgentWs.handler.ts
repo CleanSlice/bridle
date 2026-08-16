@@ -15,6 +15,7 @@ import {
   type IBridleOutgoingEvent,
   type IBridleDebugEvent,
   type IBridleSyncResponse,
+  type IBridleThinkingEvent,
 } from '../domain'
 
 /**
@@ -133,6 +134,17 @@ export class BridleAgentWsHandler implements OnGatewayConnection, OnGatewayDisco
     const agentId = client.data?.agentId as string
     if (data?.clientId && agentId) {
       this.hub.handleAgentEvent(agentId, { ...data, type: 'typing' })
+    }
+  }
+
+  @SubscribeMessage('thinking')
+  handleThinking(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: IBridleThinkingEvent,
+  ) {
+    const agentId = client.data?.agentId as string
+    if (data?.clientId && data?.turnId && agentId) {
+      this.hub.handleAgentEvent(agentId, { ...data, type: 'thinking' })
     }
   }
 

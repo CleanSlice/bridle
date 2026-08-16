@@ -7,8 +7,11 @@ import type {
   BridlePart,
   BridleUiValue,
   IBridleMessage,
+  IBridleThinkingEvent,
+  IBridleThinkingStep,
   IBridleUiPart,
   IBridleUiSubmitPart,
+  IThinkingBlock,
 } from './types'
 
 interface IBridleAttachment {
@@ -169,6 +172,168 @@ const emit = defineEmits<{
 const messages = ref<IBridleMessage[]>([])
 const isConnected = ref(false)
 const isTyping = ref(false)
+
+// ── Thinking timeline (live reasoning steps) ─────────────────────────
+// One block per agent turn, opened by the first `thinking` event and
+// frozen by the terminal `done` event (or the stale watchdog below).
+// Session-only view state — nothing here is persisted or replayed.
+const thinkingBlocks = ref<IThinkingBlock[]>([])
+// Turns terminally closed (done event / watchdog / socket close) —
+// straggler steps for these must not resurrect a segment.
+const closedTurns = new Set<string>()
+// segment key → collapsed override. Unset means the default: open while
+// thinking, collapsed once done (auto-collapse on completion).
+const collapsedBlocks = ref<Record<string, boolean>>({})
+// stepId → detail expanded. Steps arrive collapsed.
+const expandedSteps = ref<Record<string, boolean>>({})
+
+// A turn may span several segments (blocks) — turnId + seg identifies one.
+function blockKey(b: IThinkingBlock): string {
+  return `${b.turnId}#${b.seg}`
+}
+
+const hasOpenThinking = computed(() =>
+  thinkingBlocks.value.some((b) => b.status === 'thinking'),
+)
+
+// Messages and thinking blocks interleaved by timestamp — a frozen block
+// stays anchored above the answer it produced, Rovo-style.
+interface IChatFlowItem {
+  message?: IBridleMessage
+  block?: IThinkingBlock
+  ts: number
+}
+const chatItems = computed<IChatFlowItem[]>(() => {
+  const items: IChatFlowItem[] = messages.value.map((m) => ({ message: m, ts: m.ts }))
+  for (const b of thinkingBlocks.value) items.push({ block: b, ts: b.ts })
+  return items.sort((a, b) => a.ts - b.ts)
+})
+
+// Watchdog for the thinking UI: a cancelled runtime turn breaks its loop
+// without ever emitting stream_end/message or the terminal thinking event,
+// so without a timeout the shimmer would animate forever. Every
+// typing/thinking/stream event re-arms it while anything is still open.
+const THINKING_STALE_MS = 75_000
+let thinkingStaleTimer: ReturnType<typeof setTimeout> | null = null
+
+function setTyping(on: boolean): void {
+  isTyping.value = on
+  if (thinkingStaleTimer) {
+    clearTimeout(thinkingStaleTimer)
+    thinkingStaleTimer = null
+  }
+  if (on || hasOpenThinking.value) {
+    thinkingStaleTimer = setTimeout(() => {
+      thinkingStaleTimer = null
+      isTyping.value = false
+      closeAllTurns()
+    }, THINKING_STALE_MS)
+  }
+}
+
+const thinkingLabel = computed(() => `${props.title} is thinking…`)
+
+function isBlockCollapsed(b: IThinkingBlock): boolean {
+  return collapsedBlocks.value[blockKey(b)] ?? b.status === 'done'
+}
+
+function toggleBlock(b: IThinkingBlock): void {
+  collapsedBlocks.value[blockKey(b)] = !isBlockCollapsed(b)
+}
+
+function toggleStep(s: IBridleThinkingStep): void {
+  expandedSteps.value[s.id] = !expandedSteps.value[s.id]
+}
+
+function freezeThinkingBlock(b: IThinkingBlock): void {
+  b.status = 'done'
+  b.steps = b.steps.map((s) => ({ ...s, state: 'done' as const }))
+}
+
+/**
+ * Seal (collapse) every open segment. The turns stay open — later steps of
+ * the same turn open a fresh segment below the newest message.
+ */
+function freezeOpenThinking(): void {
+  for (const b of thinkingBlocks.value) {
+    if (b.status === 'thinking') freezeThinkingBlock(b)
+  }
+}
+
+/** Terminal paths (watchdog, socket close): seal segments AND close their
+ * turns so straggler steps can't resurrect a zombie segment. */
+function closeAllTurns(): void {
+  for (const b of thinkingBlocks.value) closedTurns.add(b.turnId)
+  freezeOpenThinking()
+}
+
+/**
+ * Assistant content landing below the open segment seals it — the next
+ * step opens a fresh segment under this message (the turn stays open).
+ */
+function sealThinkingBeforeNewBubble(m: IBridleMessage): void {
+  if (m.role !== 'assistant') return
+  if (!m.text || !m.text.trim()) return
+  if (messages.value.some((x) => x.id === m.id)) return // update, not new
+  freezeOpenThinking()
+}
+
+function clearThinking(): void {
+  thinkingBlocks.value = []
+  closedTurns.clear()
+  collapsedBlocks.value = {}
+  expandedSteps.value = {}
+}
+
+function onThinkingEvent(e: IBridleThinkingEvent): void {
+  if (!e?.turnId) return
+  const turnBlocks = thinkingBlocks.value.filter((x) => x.turnId === e.turnId)
+  if (e.done || !e.step) {
+    // Terminal event — freeze every segment and refuse stragglers.
+    for (const b of turnBlocks) freezeThinkingBlock(b)
+    closedTurns.add(e.turnId)
+    return
+  }
+  if (closedTurns.has(e.turnId)) return // straggler after terminal
+  // `done` updates land in whichever segment holds the step id — the
+  // segment may have sealed while the tool was still running.
+  const owner = turnBlocks.find((b) => b.steps.some((s) => s.id === e.step!.id))
+  if (owner) {
+    owner.steps = owner.steps.map((s) => (s.id === e.step!.id ? e.step! : s))
+    setTyping(true)
+    return
+  }
+  // New step: continue the trailing open segment, or open a fresh one
+  // below the newest message (segments seal when content lands).
+  let block = turnBlocks[turnBlocks.length - 1]
+  if (!block || block.status === 'done') {
+    // Linear conversation: a new turn's first step closes other turns.
+    for (const b of thinkingBlocks.value) {
+      if (b.turnId !== e.turnId && b.status === 'thinking') {
+        freezeThinkingBlock(b)
+        closedTurns.add(b.turnId)
+      }
+    }
+    // Anchor after every message already on screen — wire timestamps come
+    // from the agent's clock and could otherwise sort above the user's
+    // message on skewed clocks.
+    const lastTs = messages.value.length
+      ? messages.value[messages.value.length - 1].ts
+      : 0
+    block = {
+      turnId: e.turnId,
+      seg: turnBlocks.length,
+      steps: [],
+      status: 'thinking',
+      ts: Math.max(e.ts ?? Date.now(), lastTs + 1),
+    }
+    thinkingBlocks.value.push(block)
+  }
+  block.steps.push(e.step)
+  // Steps mean the agent is actively working — keep the status shimmer on
+  // through tool execution and re-arm the stale watchdog.
+  setTyping(true)
+}
 const connectionError = ref<BridleAuthError | Error | null>(null)
 const isOpen = ref(props.mode === 'inline' || coerceBool(props.defaultOpen))
 const draft = ref('')
@@ -306,6 +471,10 @@ async function connect(): Promise<void> {
   client.on('close', () => {
     if (gen !== connectGen) return
     isConnected.value = false
+    // Connection gone — nothing can finish this turn, stop the shimmer
+    // and settle any open timeline into its frozen state.
+    closeAllTurns()
+    setTyping(false)
   })
   client.on('error', (err) => {
     if (gen !== connectGen) return
@@ -328,17 +497,23 @@ async function connect(): Promise<void> {
   })
   client.on('typing', () => {
     if (gen !== connectGen) return
-    isTyping.value = true
+    setTyping(true)
+  })
+  client.on('thinking', (e) => {
+    if (gen !== connectGen) return
+    onThinkingEvent(e)
   })
   client.on('message', (m) => {
     if (gen !== connectGen) return
-    isTyping.value = false
+    setTyping(false)
+    sealThinkingBeforeNewBubble(m)
     upsert(m)
     emit('message', m)
   })
   client.on('stream', (m) => {
     if (gen !== connectGen) return
-    isTyping.value = false
+    setTyping(false)
+    sealThinkingBeforeNewBubble(m)
     upsert(m)
   })
   client.on('stream_end', (m) => {
@@ -418,7 +593,7 @@ function send(): void {
     parts,
     ts: Date.now(),
   })
-  isTyping.value = true
+  setTyping(true)
   client.send(text, parts)
   draft.value = ''
   attachments.value = []
@@ -829,7 +1004,7 @@ function maybeShowGreeting(): void {
   }
 
   greetingShown.value = true
-  isTyping.value = true
+  setTyping(true)
 
   const raw =
     typeof props.greetingDelay === 'string'
@@ -839,7 +1014,7 @@ function maybeShowGreeting(): void {
 
   greetingTimer = setTimeout(() => {
     greetingTimer = null
-    isTyping.value = false
+    setTyping(false)
     // User snuck a message in during the delay — drop the greeting so we
     // don't shove it above their first turn.
     if (messages.value.length > 0) return
@@ -904,8 +1079,9 @@ async function startNewChat(): Promise<void> {
   }
   cancelGreetingTimer()
   messages.value = []
+  clearThinking()
   greetingShown.value = false
-  isTyping.value = false
+  setTyping(false)
   connectionError.value = null
   // Suppress the next transcript replay too — belt-and-braces in case the
   // archive endpoint was a no-op (older hub without the override) and the
@@ -950,10 +1126,15 @@ function onKeydown(e: KeyboardEvent): void {
 }
 
 watch(
-  [messages, isTyping],
+  [messages, isTyping, thinkingBlocks],
   async () => {
+    // Capture BEFORE the DOM grows: follow only a reader who was already at
+    // the bottom — never yank back someone who scrolled up to re-read.
+    const el = scrollEl.value
+    const nearBottom =
+      !el || el.scrollHeight - el.scrollTop - el.clientHeight < 80
     await nextTick()
-    if (scrollEl.value) {
+    if (nearBottom && scrollEl.value) {
       scrollEl.value.scrollTop = scrollEl.value.scrollHeight
     }
   },
@@ -967,6 +1148,7 @@ watch(
   () => {
     if (!props.apiUrl || !props.agentId) return
     messages.value = []
+    clearThinking()
     cancelGreetingTimer()
     greetingShown.value = false
     void connect()
@@ -1023,6 +1205,7 @@ onBeforeUnmount(() => {
   unbindAutoColorMode()
   cancelGreetingTimer()
   cancelPopupTimer()
+  setTyping(false)
   if (typeof document !== 'undefined') {
     document.removeEventListener('click', onDocClick)
     document.removeEventListener('keydown', onDocKeydown)
@@ -1228,9 +1411,12 @@ defineExpose({
           </template>
           <template v-else>Start a conversation</template>
         </div>
+        <template
+          v-for="{ message: m, block: b } in chatItems"
+          :key="m ? m.id : (b ? blockKey(b) : '')"
+        >
         <div
-          v-for="m in messages"
-          :key="m.id"
+          v-if="m"
           :class="['bridle__msg', `bridle__msg--${m.role}`]"
         >
           <div
@@ -1411,8 +1597,77 @@ defineExpose({
             <span v-if="m.text && uiSubmitParts(m).length === 0" class="bridle__msg-text">{{ m.text }}</span>
           </div>
         </div>
-        <div v-if="isTyping" class="bridle__typing" aria-label="Agent is typing">
-          <span /><span /><span />
+        <div
+          v-else-if="b"
+          class="bridle__thinking"
+          :role="b.status === 'thinking' ? 'status' : undefined"
+          :aria-label="b.status === 'thinking' ? thinkingLabel : undefined"
+        >
+          <div class="bridle__thinking-header">
+            <span
+              class="bridle__thinking-status"
+              :class="{ 'bridle__thinking-status--done': b.status === 'done' }"
+            >{{ b.status === 'thinking' ? thinkingLabel : 'Thought for a moment' }}</span>
+            <button
+              v-if="b.steps.length"
+              type="button"
+              class="bridle__thinking-toggle"
+              :aria-expanded="!isBlockCollapsed(b)"
+              aria-label="Toggle thinking details"
+              @click="toggleBlock(b)"
+            >
+              <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
+            </button>
+          </div>
+          <div
+            v-if="b.steps.length && !isBlockCollapsed(b)"
+            class="bridle__thinking-steps"
+          >
+            <div
+              v-for="s in b.steps"
+              :key="s.id"
+              class="bridle__thinking-step"
+              :class="{ 'bridle__thinking-step--active': s.state === 'active' }"
+            >
+              <button
+                v-if="s.detail"
+                type="button"
+                class="bridle__thinking-step-head bridle__thinking-step-head--expandable"
+                :aria-expanded="!!expandedSteps[s.id]"
+                :aria-controls="`bridle-step-${s.id}`"
+                @click="toggleStep(s)"
+              >
+                <span
+                  class="bridle__thinking-step-label"
+                  :class="{ 'bridle__thinking-step-label--active': s.state === 'active' }"
+                >{{ s.label }}</span>
+                <svg class="bridle__thinking-step-chevron" viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
+              </button>
+              <div v-else class="bridle__thinking-step-head">
+                <span
+                  class="bridle__thinking-step-label"
+                  :class="{ 'bridle__thinking-step-label--active': s.state === 'active' }"
+                >{{ s.label }}</span>
+              </div>
+              <div
+                v-if="s.detail && expandedSteps[s.id]"
+                :id="`bridle-step-${s.id}`"
+                class="bridle__thinking-step-detail"
+                v-html="renderMarkdown(s.detail)"
+              />
+            </div>
+          </div>
+        </div>
+        </template>
+        <div
+          v-if="isTyping && !hasOpenThinking"
+          class="bridle__thinking"
+          role="status"
+          :aria-label="thinkingLabel"
+        >
+          <div class="bridle__thinking-header">
+            <span class="bridle__thinking-status">{{ thinkingLabel }}</span>
+          </div>
         </div>
       </div>
 
@@ -2052,28 +2307,157 @@ defineExpose({
   background: rgba(255, 255, 255, 0.08);
 }
 
-.bridle__typing {
+/* ── Thinking status (Rovo-style shimmer) ─────────────────────────────
+   The status text carries a traveling light sweep: a gradient clipped to
+   the glyphs, animated across. Solid `background` first so browsers that
+   reject the gradient/color-mix still render readable muted text. */
+.bridle__thinking {
   align-self: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 2px;
+  max-width: 100%;
+}
+.bridle__thinking-header {
   display: inline-flex;
-  gap: 4px;
-  padding: 10px 14px;
-  background: var(--bridle-bubble-bg);
-  border-radius: 14px;
-  border-bottom-left-radius: 4px;
+  align-items: center;
+  gap: 6px;
 }
-.bridle__typing span {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
+.bridle__thinking-status {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--bridle-muted);
   background: var(--bridle-muted);
-  animation: bridle-bounce 1.4s infinite ease-in-out;
+  background: linear-gradient(
+    90deg,
+    var(--bridle-muted) 0%,
+    var(--bridle-muted) 35%,
+    color-mix(in srgb, var(--bridle-muted) 30%, var(--bridle-bg)) 50%,
+    var(--bridle-muted) 65%,
+    var(--bridle-muted) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: bridle-shimmer 1.6s linear infinite;
 }
-.bridle__typing span:nth-child(2) { animation-delay: 0.15s; }
-.bridle__typing span:nth-child(3) { animation-delay: 0.3s; }
 
-@keyframes bridle-bounce {
-  0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
-  30% { opacity: 1; transform: translateY(-3px); }
+@keyframes bridle-shimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
+/* Frozen block header: summary row, sweep off. */
+.bridle__thinking-status--done {
+  animation: none;
+  background: none;
+  -webkit-text-fill-color: currentColor;
+  color: var(--bridle-muted);
+}
+
+.bridle__thinking-toggle {
+  display: inline-flex;
+  align-items: center;
+  background: none;
+  border: 0;
+  padding: 2px;
+  cursor: pointer;
+  color: var(--bridle-muted);
+}
+.bridle__thinking-toggle svg {
+  transition: transform 0.15s ease;
+}
+.bridle__thinking-toggle[aria-expanded="false"] svg {
+  transform: rotate(-90deg);
+}
+
+/* Vertical timeline of steps, thin left rule à la the Rovo reference. */
+.bridle__thinking-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-left: 5px;
+  padding-left: 12px;
+  border-left: 1px solid var(--bridle-border);
+}
+.bridle__thinking-step {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+.bridle__thinking-step-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: 0;
+  padding: 2px 0;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  color: var(--bridle-muted);
+}
+.bridle__thinking-step-head--expandable {
+  cursor: pointer;
+}
+.bridle__thinking-step-chevron {
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+.bridle__thinking-step-head[aria-expanded="false"] .bridle__thinking-step-chevron {
+  transform: rotate(-90deg);
+}
+.bridle__thinking-step-label {
+  color: var(--bridle-muted);
+}
+/* The in-progress step carries the same light sweep as the status line. */
+.bridle__thinking-step-label--active {
+  color: var(--bridle-fg);
+  background: var(--bridle-fg);
+  background: linear-gradient(
+    90deg,
+    var(--bridle-fg) 0%,
+    var(--bridle-fg) 35%,
+    color-mix(in srgb, var(--bridle-fg) 30%, var(--bridle-bg)) 50%,
+    var(--bridle-fg) 65%,
+    var(--bridle-fg) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: bridle-shimmer 1.6s linear infinite;
+}
+.bridle__thinking-step-detail {
+  margin: 2px 0 6px;
+  padding-left: 8px;
+  border-left: 2px solid var(--bridle-border);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--bridle-muted);
+  overflow-wrap: anywhere;
+}
+.bridle__thinking-step-detail :where(p) { margin: 4px 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .bridle__thinking-status,
+  .bridle__thinking-step-label--active {
+    animation: none;
+    background: none;
+    -webkit-text-fill-color: currentColor;
+  }
+  .bridle__thinking-status {
+    color: var(--bridle-muted);
+  }
+  .bridle__thinking-step-label--active {
+    color: var(--bridle-fg);
+  }
+  .bridle__thinking-toggle svg,
+  .bridle__thinking-step-chevron {
+    transition: none;
+  }
 }
 
 .bridle__input {
