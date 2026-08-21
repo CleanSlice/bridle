@@ -37,10 +37,11 @@ import {
  *   "ping"        {}
  *
  * Events (Hub → Agent):
- *   "message"     { clientId, text, messageId, images? }
- *   "debug_set"   { enabled }
- *   "sync"        { requestId }
- *   "pong"        {}
+ *   "message"        { clientId, text, messageId, images? }
+ *   "debug_set"      { enabled }
+ *   "sync"           { requestId }
+ *   "session_clear"  { channel }
+ *   "pong"           {}
  */
 @WebSocketGateway({ namespace: '/ws/agent' })
 export class BridleAgentWsHandler implements OnGatewayConnection, OnGatewayDisconnect {

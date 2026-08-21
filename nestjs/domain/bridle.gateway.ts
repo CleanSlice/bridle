@@ -57,6 +57,16 @@ export abstract class IBridleGateway {
    */
   abstract setDebug(agentId: string, enabled: boolean): void
   /**
+   * Tell the running agent to drop its local copy of a session (file +
+   * in-memory cache) for the given channel. Consumers that back
+   * IBridleTranscriptGateway with persistent, out-of-band storage (e.g. S3)
+   * MUST call this after archiving/deleting a channel's transcript —
+   * otherwise the agent's own sync mechanism can re-upload its still-intact
+   * local copy and resurrect the "deleted" history. Silently skipped if the
+   * agent isn't currently connected.
+   */
+  abstract clearAgentSession(agentId: string, channel: string): void
+  /**
    * Ask the agent for agentId to push its local state to remote storage and
    * resolve when the agent acks. Resolves with `agentOnline=false` immediately
    * if no agent is connected for agentId.

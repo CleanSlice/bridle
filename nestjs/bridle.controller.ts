@@ -135,7 +135,13 @@ export class BridleController {
       await this.transcripts.delete(agentId, channel)
     } catch (err) {
       this.logger.warn(`Transcript reset failed for ${agentId}/${channel}: ${(err as Error).message}`)
+      return
     }
+    // Tell the live agent to drop its own local/in-memory copy too — a
+    // persistent IBridleTranscriptGateway (e.g. S3-backed) only touches its
+    // own storage, and the running agent would otherwise re-upload its
+    // still-intact local session file on the next local change.
+    this.hub.clearAgentSession(agentId, channel)
   }
 
   @ApiOperation({
@@ -152,11 +158,16 @@ export class BridleController {
     @Query('channel') channelRaw?: string,
   ): Promise<{ archivedPath?: string }> {
     const channel = (channelRaw ?? 'admin').trim() || 'admin'
+    let result: { archivedPath?: string }
     try {
-      return await this.transcripts.archive(agentId, channel)
+      result = await this.transcripts.archive(agentId, channel)
     } catch (err) {
       this.logger.warn(`Transcript archive failed for ${agentId}/${channel}: ${(err as Error).message}`)
       return {}
     }
+    // Tell the live agent to drop its own local/in-memory copy too — see the
+    // comment in resetTranscript above.
+    this.hub.clearAgentSession(agentId, channel)
+    return result
   }
 }
