@@ -26,21 +26,31 @@ export abstract class IBridleGateway {
   abstract sendToAgent(clientId: string, agentId: string, text: string, parts: BridlePart[]): void
   /** Send an event to a specific browser client */
   abstract sendToClient(clientId: string, data: unknown): void
-  /** Register a browser client for a specific agentId */
+  /** Register a browser client for a specific agentId. `socketId` marks the
+   * owning connection so a stale disconnect (a blackholed socket detected
+   * late via ping timeout) can't wipe a newer registration for the same
+   * clientId after a reconnect — without this, the browser silently stops
+   * receiving stream/message events until the page is reloaded. */
   abstract registerClient(
     clientId: string,
     agentId: string,
+    socketId: string,
     send: (data: unknown) => void,
     isAdmin: boolean,
     prompt?: string,
     capabilities?: string[],
   ): void
-  /** Unregister a browser client */
-  abstract unregisterClient(clientId: string): void
-  /** Register an agent runtime connection for a specific agentId */
-  abstract registerAgent(agentId: string, send: (data: unknown) => void): void
-  /** Unregister an agent runtime connection for a specific agentId */
-  abstract unregisterAgent(agentId: string): void
+  /** Unregister a browser client — no-op unless `socketId` still owns the
+   * current registration for clientId. */
+  abstract unregisterClient(clientId: string, socketId: string): void
+  /** Register an agent runtime connection for a specific agentId. `socketId`
+   * marks the owning connection — same rationale as registerClient, for the
+   * agent side (e.g. during a pod restart, the old pod's socket can
+   * disconnect after the new pod already registered). */
+  abstract registerAgent(agentId: string, socketId: string, send: (data: unknown) => void): void
+  /** Unregister an agent runtime connection — no-op unless `socketId` still
+   * owns the current registration for agentId. */
+  abstract unregisterAgent(agentId: string, socketId: string): void
   /** Whether an agent runtime is currently registered for this agentId. */
   abstract isAgentConnected(agentId: string): boolean
   /** Handle an event from the agent — route to the target browser client for that agentId */

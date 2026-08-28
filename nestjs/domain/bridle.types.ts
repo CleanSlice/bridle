@@ -221,6 +221,8 @@ export interface IBridleAgentHealthData {
 /** Registered client metadata */
 export interface IBridleClientData {
   agentId: string
+  /** Owning socket/connection id — see IBridleGateway.unregisterClient. */
+  socketId: string
   send: (data: unknown) => void
   /**
    * True when the JWT carried an admin role. Admin clients receive admin-only

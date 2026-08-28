@@ -78,7 +78,7 @@ export class BridleAgentWsHandler implements OnGatewayConnection, OnGatewayDisco
       client.emit(event, data)
     }
 
-    this.hub.registerAgent(agentId, send)
+    this.hub.registerAgent(agentId, client.id, send)
     this.logger.log(`Agent connected: agentId=${agentId}`)
 
     // Re-apply debug flag so a freshly-started runtime picks up whatever the
@@ -100,7 +100,7 @@ export class BridleAgentWsHandler implements OnGatewayConnection, OnGatewayDisco
   handleDisconnect(client: Socket) {
     const agentId = client.data?.agentId as string | undefined
     if (agentId) {
-      this.hub.unregisterAgent(agentId)
+      this.hub.unregisterAgent(agentId, client.id)
       this.logger.warn(`Agent disconnected: agentId=${agentId}`)
     }
   }

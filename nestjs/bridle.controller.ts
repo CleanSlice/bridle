@@ -44,20 +44,25 @@ export class BridleController {
     const clientId = 'sync-' + crypto.randomUUID()
     const chunks: string[] = []
 
+    // clientId is freshly minted above (never reused across calls), so it
+    // doubles as its own socket identity here — no real connection to track.
+    const socketId = clientId
+
     return new Promise((resolve) => {
       const timeout = setTimeout(() => {
-        this.hub.unregisterClient(clientId)
+        this.hub.unregisterClient(clientId, socketId)
         resolve({ text: chunks.join('') || 'Timeout: no response from agent', messageId: '', ts: Date.now() })
       }, 120_000)
 
       this.hub.registerClient(
         clientId,
         agentId,
+        socketId,
         (data: unknown) => {
           const event = data as Record<string, unknown>
           if (event.type === 'message' || event.type === 'stream_end') {
             clearTimeout(timeout)
-            this.hub.unregisterClient(clientId)
+            this.hub.unregisterClient(clientId, socketId)
             resolve({ text: event.text ?? chunks.join(''), messageId: event.messageId, ts: event.ts })
           } else if (event.type === 'stream') {
             chunks.push((event.text as string) ?? '')

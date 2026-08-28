@@ -145,7 +145,7 @@ export class BridleClientWsHandler implements OnGatewayConnection, OnGatewayDisc
       client.emit(event, data)
     }
 
-    this.hub.registerClient(clientId, agentId, send, isAdmin, prompt, capabilities)
+    this.hub.registerClient(clientId, agentId, client.id, send, isAdmin, prompt, capabilities)
     client.emit('welcome', { clientId })
     // Snapshot the runtime's current online state immediately so the chat UI
     // can render the right indicator before any subsequent register/unregister
@@ -162,7 +162,7 @@ export class BridleClientWsHandler implements OnGatewayConnection, OnGatewayDisc
   handleDisconnect(client: Socket) {
     const clientId = client.data?.clientId as string | undefined
     if (clientId) {
-      this.hub.unregisterClient(clientId)
+      this.hub.unregisterClient(clientId, client.id)
       this.logger.log(`Browser disconnected: clientId=${clientId}`)
     }
   }
