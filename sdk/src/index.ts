@@ -118,6 +118,9 @@ function init(opts: IBridleInitOptions): IBridleInstance {
   if (opts.emptyAvatar) el.setAttribute('empty-avatar', opts.emptyAvatar)
   if (opts.emptyTitle) el.setAttribute('empty-title', opts.emptyTitle)
   if (opts.emptySubtitle) el.setAttribute('empty-subtitle', opts.emptySubtitle)
+  // Empty string is meaningful here — it hides the work log entirely — so this
+  // one is checked against undefined rather than for truthiness.
+  if (opts.thinkingLabel !== undefined) el.setAttribute('thinking-label', opts.thinkingLabel)
   if (opts.suggestions?.length) {
     // Serialize as JSON so the component's parser round-trips multi-line /
     // pipe-containing strings without surprises.
@@ -229,6 +232,7 @@ function autoMount(): void {
     emptyAvatar: ds.emptyAvatar,
     emptyTitle: ds.emptyTitle,
     emptySubtitle: ds.emptySubtitle,
+    thinkingLabel: ds.thinkingLabel,
     suggestions: ds.suggestions ? parseSuggestionsAttr(ds.suggestions) : undefined,
     customCss: ds.customCss,
     stylesheets,

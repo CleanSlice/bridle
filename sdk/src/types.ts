@@ -85,6 +85,25 @@ export interface IBridleUiSubmitPart {
   values: Record<string, BridleUiValue>
 }
 
+// ── Work log (the agent's reasoning) ──────────────────────────
+// An agent that reasons out loud sends those lines as `message` frames
+// DURING a turn. They are not the answer and must not land in the answer's
+// bubble; the widget folds them into one collapsible work-log entry above it.
+// See docs/PROTOCOL.md § Notes (agent reasoning).
+
+/** What a `message` frame is, when it is not the answer. */
+export type BridleMessageKind = 'thinking' | 'tool'
+
+/** One line of the work log. */
+export interface IBridleThinkingStep {
+  id: string
+  text: string
+  /** `tool` steps are the agent reaching for something, not thinking about it. */
+  kind: BridleMessageKind
+  /** The last step of a live log is still running; everything else is done. */
+  running: boolean
+}
+
 export interface IBridleMessage {
   id: string
   role: 'user' | 'assistant'
@@ -93,6 +112,16 @@ export interface IBridleMessage {
   ts: number
   /** True between `stream` and `stream_end` events. */
   streaming?: boolean
+  /**
+   * Present ONLY on a work-log entry — a synthetic assistant message that
+   * holds the notes of one turn instead of an answer. `text`/`parts` stay
+   * empty on it, so anything walking the transcript for content skips it.
+   */
+  steps?: IBridleThinkingStep[]
+  /** The turn that produced this work log is still running. */
+  live?: boolean
+  /** Set on incoming frames the runtime marked as a note. */
+  kind?: BridleMessageKind
 }
 
 export interface IBridleInitOptions {
@@ -196,6 +225,12 @@ export interface IBridleInitOptions {
    * string — both are accepted).
    */
   suggestions?: string[]
+  /**
+   * Caption of the collapsed work-log row — the block that holds the agent's
+   * reasoning while it works. Default: "Work log". Pass an empty string to
+   * drop the reasoning entirely and show answers only.
+   */
+  thinkingLabel?: string
   /** Hooks for headless side effects in addition to the UI. */
   onReady?: () => void
   onMessage?: (message: IBridleMessage) => void

@@ -260,6 +260,27 @@ export class BridleRepository implements IChannelGateway {
     })
   }
 
+  /**
+   * Send a NOTE — a line of the agent's reasoning, or the tool it is about to
+   * reach for. Not the answer: the browser folds the notes of one turn into a
+   * single collapsible work-log row above the reply, and never into the reply
+   * itself. See docs/PROTOCOL.md § Notes.
+   *
+   * Send these BETWEEN `typing` and the end of the stream — that window is
+   * what makes them notes even for receivers that ignore `kind`.
+   */
+  async note(to: string, text: string, kind: 'thinking' | 'tool' = 'thinking'): Promise<void> {
+    if (!text.trim()) return
+    this.socket?.emit('message', {
+      clientId: to,
+      text,
+      parts: [{ type: BridlePartTypes.Text as const, text }],
+      kind,
+      messageId: randomUUID(),
+      ts: Date.now(),
+    })
+  }
+
   onMessage(handler: (msg: IBridleMessageData) => Promise<void>): void {
     this.handler = handler
   }

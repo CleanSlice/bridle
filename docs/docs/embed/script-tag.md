@@ -35,6 +35,7 @@ When the script loads, it auto-registers a `<bridle-chat>` Custom Element and mo
 | `data-empty-avatar` | optional | URL of an avatar shown on the empty-state screen. See [Empty state](#empty-state) |
 | `data-empty-title` | optional | Headline shown on the empty-state screen, e.g. "What can I help with?" |
 | `data-empty-subtitle` | optional | Sub-line shown under `data-empty-title` |
+| `data-thinking-label` | `Work log` | Caption of the collapsed work-log row — the block holding the agent's reasoning for a turn. Set to an empty string to hide reasoning entirely. See [Work log](#work-log) |
 | `data-suggestions` | optional | Suggestion chips rendered on the empty state. Pipe-separated (`Q1|Q2|Q3`) or a JSON array string. Clicking a chip sends it as a user message |
 
 ## Choosing where to load the script from
@@ -123,6 +124,33 @@ init({
 - **Long replies as chips** — chip text becomes the entire user message. Keep them short prompts ("Pricing?"), not full sentences the visitor wouldn't have typed.
 - **A FAQ list** — chips are for *opening* the conversation, not a static knowledge base. After the first user turn they're gone.
 - **Forms / structured input** — chips send free text. For "pick a plan: Basic / Pro / Team" structured selection, the runtime should emit assistant messages with parts of type the renderer understands (not a feature of the SDK today).
+
+## Work log
+
+Agents that reason out loud send those lines while they work — a thought per
+step, a line per tool they reach for. The widget does **not** draw them as
+answers. Every note of one turn folds into a single collapsed row above the
+reply:
+
+```
+✦ Work log                                   · 3 steps  ›
+```
+
+While the agent is still working the row shows the step it is on right now
+next to a spinner, so a long chain never looks like a hung page; when the
+answer lands the row settles to its caption. Clicking it reveals the whole
+trace. It starts collapsed and stays collapsed unless the visitor opens it.
+
+Rename the row with `data-thinking-label`, or hide reasoning altogether:
+
+```html
+<script src="…" data-thinking-label=""></script>
+```
+
+Nothing is required on the agent side — a runtime that sends its notes between
+`typing` and `stream_end` gets this for free. Marking them explicitly with
+`kind: "thinking" | "tool"` is preferred and documented in the
+[protocol](/protocol/websocket).
 
 ## Welcome message
 

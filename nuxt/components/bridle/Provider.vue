@@ -4,6 +4,7 @@ import { storeToRefs } from 'pinia'
 import { useBridleStore } from '../../stores/bridle'
 import Message from './Message.vue'
 import Input from './Input.vue'
+import Thinking from './Thinking.vue'
 import { Card, CardContent, CardFooter, CardHeader } from '#theme/components/ui/card'
 import { ScrollArea } from '#theme/components/ui/scroll-area'
 import { Button } from '#theme/components/ui/button'
@@ -21,12 +22,18 @@ const props = withDefaults(defineProps<{
   channel?: string
   showNewChatButton?: boolean
   resetConfirmText?: string
+  /**
+   * Caption of the collapsed work-log row — the block holding the agent's
+   * reasoning for a turn. Default: "Work log".
+   */
+  thinkingLabel?: string
 }>(), {
   title: 'Agent Chat',
   placeholder: 'Type a message...',
   showStatus: true,
   channel: 'admin',
   showNewChatButton: true,
+  thinkingLabel: 'Work log',
   resetConfirmText:
     'Delete the saved transcript and start fresh? Past messages will be removed from storage. The agent\'s in-memory context may persist until its next restart.',
 })
@@ -184,11 +191,12 @@ async function onNewChat() {
             Start a conversation with the agent
           </div>
 
-          <Message
-            v-for="msg in messages"
-            :key="msg.id"
-            :message="msg"
-          />
+          <template v-for="msg in messages" :key="msg.id">
+            <!-- A work-log entry carries the turn's reasoning instead of an
+                 answer, and is drawn as a collapsed row rather than a bubble. -->
+            <Thinking v-if="msg.steps" :message="msg" :label="thinkingLabel" />
+            <Message v-else :message="msg" />
+          </template>
 
           <div v-if="isTyping" class="flex gap-3 mr-auto">
             <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted">

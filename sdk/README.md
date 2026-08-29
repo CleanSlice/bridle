@@ -53,6 +53,32 @@ chat.close()
 chat.destroy()
 ```
 
+## Work log (agent reasoning)
+
+Runtimes that reason out loud send those lines while they work. The widget
+never draws them as answers — the notes of one turn fold into a single
+collapsed row above the reply:
+
+```
+✦ Work log                                   · 3 steps  ›
+```
+
+While the turn runs the row shows the step the agent is on right now next to a
+spinner, so a long chain never looks like a hung page; once the answer lands it
+settles to its caption. It starts collapsed, and only the visitor opens it.
+
+```js
+init({ /* … */ thinkingLabel: 'Thinking' })   // rename the row
+init({ /* … */ thinkingLabel: '' })           // hide reasoning entirely
+```
+
+Or on a script tag: `data-thinking-label="Thinking"`.
+
+Nothing is required of the agent — notes sent between `typing` and
+`stream_end` are recognised as such. Marking them with
+`kind: "thinking" | "tool"` is preferred; see
+[PROTOCOL.md § Notes](../docs/PROTOCOL.md#notes-agent-reasoning).
+
 ## Headless client (no UI)
 
 ```js

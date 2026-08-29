@@ -1,5 +1,5 @@
 import { io, type Socket } from 'socket.io-client'
-import type { BridlePart, IBridleMessage } from './types'
+import type { BridleMessageKind, BridlePart, IBridleMessage } from './types'
 
 export interface IBridleClientOptions {
   apiUrl: string
@@ -175,6 +175,12 @@ function toMessage(
   const parts =
     (d.parts as BridlePart[]) ??
     (text ? [{ type: 'text' as const, text }] : [])
+  // `kind` marks a frame as a NOTE — the agent's reasoning rather than its
+  // answer (docs/PROTOCOL.md § Notes). Unknown values are dropped rather than
+  // passed through: the widget switches rendering on this field, and a typo on
+  // the runtime side should degrade to a normal bubble, not to a broken one.
+  const kind = d.kind === 'thinking' || d.kind === 'tool' ? (d.kind as BridleMessageKind) : undefined
+
   return {
     id: (d.messageId as string) ?? randomId(),
     role,
@@ -182,6 +188,7 @@ function toMessage(
     parts,
     ts: (d.ts as number) ?? Date.now(),
     ...(streaming !== undefined ? { streaming } : {}),
+    ...(kind ? { kind } : {}),
   }
 }
 

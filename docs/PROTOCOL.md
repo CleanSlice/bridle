@@ -319,6 +319,51 @@ Complete (non-streamed) response with rich parts.
 }
 ```
 
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `kind` | `'thinking' \| 'tool'` | no | Marks this frame as a **note** — the agent's reasoning, not its answer. See [Notes](#notes-agent-reasoning). |
+
+#### Notes (agent reasoning)
+
+An agent that reasons out loud sends those lines as ordinary `message` frames
+while it works — one per thought, one per tool it reaches for. They are **not
+the answer**, and drawn as answers they are indistinguishable from it: the
+visitor reads several bubbles of the agent talking to itself and then, below
+them, the reply.
+
+A receiver folds every note of one turn into a single collapsible row above the
+answer — the SDK calls it the *work log*.
+
+**A frame is a note when either is true:**
+
+1. It says so — `kind: 'thinking'` (a thought) or `kind: 'tool'` (reaching for
+   something). Runtimes should set this; it is the only signal that survives a
+   turn with no streamed answer.
+2. It arrived **during a turn** — after `typing`, before `stream_end`. A
+   runtime raises `typing` when an *answer* is coming and closes with
+   `stream_end`, so whatever it sends in between is by definition not that
+   answer. This is what lets existing runtimes get the work log without a
+   change.
+
+```json
+{
+  "clientId": "550e8400-e29b-41d4-a716-446655440000",
+  "text": "The user is asking for a story — no tools needed here.",
+  "parts": [{ "type": "text", "text": "The user is asking for a story — no tools needed here." }],
+  "kind": "thinking",
+  "messageId": "…",
+  "ts": 1712847600000
+}
+```
+
+Tool notes are conventionally an arrow and the tool's name (`→ searchWeb`); an
+unmarked note that starts with `→` is read as `tool`, everything else as
+`thinking`.
+
+A plain `message` sent with **no turn open** is an ordinary answer bubble, and
+stays one — that is what the reference runtime's `send()` does, and nothing
+about it changed.
+
 #### `typing`
 
 Agent is about to start generating a response.
@@ -562,6 +607,8 @@ interface IBridleOutgoingEvent {
   parts?: BridlePart[]
   messageId?: string
   ts?: number
+  /** On `message` only: this frame is a note, not the answer. */
+  kind?: 'thinking' | 'tool'
 }
 ```
 

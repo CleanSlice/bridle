@@ -4,9 +4,11 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { BridleClient, BridleAuthError } from './client'
 import type {
+  BridleMessageKind,
   BridlePart,
   BridleUiValue,
   IBridleMessage,
+  IBridleThinkingStep,
   IBridleUiPart,
   IBridleUiSubmitPart,
 } from './types'
@@ -133,6 +135,13 @@ const props = withDefaults(
      * array string — both are accepted).
      */
     suggestions?: string | string[]
+    /**
+     * Caption of the collapsed work-log row — the block that holds the
+     * agent's reasoning while it works (docs/PROTOCOL.md § Notes). Default:
+     * "Work log". Set it to your own wording, or to an empty string to drop
+     * the reasoning entirely and show answers only.
+     */
+    thinkingLabel?: string
   }>(),
   {
     title: 'Agent Chat',
@@ -141,6 +150,7 @@ const props = withDefaults(
     defaultOpen: false,
     theme: 'default',
     colorMode: 'auto',
+    thinkingLabel: 'Work log',
   },
 )
 
@@ -287,6 +297,113 @@ function upsert(m: IBridleMessage): void {
   else messages.value.push(m)
 }
 
+// ── The work log ───────────────────────────────────────────────────────────
+//
+// An agent that reasons out loud sends those lines as ordinary `message`
+// frames while it works — one per thought, one per tool it reaches for. They
+// are NOT the answer, and rendered as answers they are indistinguishable from
+// it: the visitor reads three grey bubbles of the agent talking to itself and
+// then, somewhere below, the reply. What follows folds every note of one turn
+// into a single collapsible row above the answer.
+//
+// TWO WAYS A FRAME IS KNOWN TO BE A NOTE, in this order:
+//
+//   1. It says so — `kind: 'thinking' | 'tool'` (docs/PROTOCOL.md § Notes).
+//   2. It arrived DURING a turn. A runtime raises `typing` when an answer is
+//      coming and closes with `stream_end`; anything sent in between is by
+//      definition not that answer. This is what makes the block work with
+//      runtimes that ship notes today without marking them, and it is safe
+//      because the reference runtime raises `typing` only around a stream —
+//      a plain, unannounced `message` is still drawn as a bubble.
+
+/** Work logs the visitor has opened, by entry id. Collapsed is the default. */
+const openLogs = ref<Set<string>>(new Set())
+
+function toggleLog(id: string): void {
+  const next = new Set(openLogs.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  openLogs.value = next
+}
+
+/**
+ * What the one collapsed row says.
+ *
+ * While the turn runs it is the step the agent is on RIGHT NOW, not the
+ * caption: during reasoning there is nothing else on screen, and a row that
+ * only said "Work log · 7 steps" next to a spinner is indistinguishable from
+ * a hung page. Once the answer lands the caption takes over — by then the
+ * moving part is the answer itself.
+ */
+function logSummary(m: IBridleMessage): string {
+  if (!m.live) return props.thinkingLabel
+  const last = m.steps?.[m.steps.length - 1]
+  return last?.text || props.thinkingLabel
+}
+
+function stepCount(m: IBridleMessage): string {
+  const n = m.steps?.length ?? 0
+  return `${n} ${n === 1 ? 'step' : 'steps'}`
+}
+
+/** The work-log entry being filled, or null between turns. */
+let logId: string | null = null
+
+/** A turn is running: `typing` has been raised and nothing has closed it yet. */
+let turnOpen = false
+
+function noteKind(m: IBridleMessage): BridleMessageKind | null {
+  if (m.kind === 'thinking' || m.kind === 'tool') return m.kind
+  if (!turnOpen) return null
+  // An unmarked note during a turn. Tool notes are conventionally an arrow and
+  // a name (`→ searchWeb`); everything else reads as a thought.
+  return m.text.trimStart().startsWith('\u2192') ? 'tool' : 'thinking'
+}
+
+/** Append one note to this turn's work log, opening the log if needed. */
+function pushStep(m: IBridleMessage, kind: BridleMessageKind): void {
+  const text = m.text.trim()
+  if (!text) return
+
+  const log = logId ? messages.value.find((x) => x.id === logId) : undefined
+  if (!log || !log.steps) {
+    logId = `log-${m.id}`
+    messages.value.push({
+      id: logId,
+      role: 'assistant',
+      text: '',
+      parts: [],
+      ts: m.ts,
+      live: true,
+      steps: [{ id: m.id, text, kind, running: true }],
+    })
+    return
+  }
+
+  // Only the newest step is in flight; the one before it has just finished.
+  for (const step of log.steps) step.running = false
+  log.steps.push({ id: m.id, text, kind, running: true })
+  log.live = true
+}
+
+/**
+ * Close the turn's work log: nothing is running any more.
+ *
+ * Called when the answer ends and when the visitor speaks again — the second
+ * one matters because a turn that produced notes and then died (socket drop,
+ * runtime crash) would otherwise keep a spinner running for the rest of the
+ * session.
+ */
+function settleLog(): void {
+  const log = logId ? messages.value.find((x) => x.id === logId) : undefined
+  if (log?.steps) {
+    for (const step of log.steps) step.running = false
+    log.live = false
+  }
+  logId = null
+  turnOpen = false
+}
+
 function buildClient(): BridleClient {
   return new BridleClient({
     apiUrl: props.apiUrl,
@@ -337,20 +454,34 @@ async function connect(): Promise<void> {
   client.on('typing', () => {
     if (gen !== connectGen) return
     isTyping.value = true
+    turnOpen = true
   })
   client.on('message', (m) => {
     if (gen !== connectGen) return
+    const kind = noteKind(m)
+    if (kind) {
+      // A note keeps the turn's indicator up: the agent is still working, and
+      // the row it just wrote is the evidence. `emit('message')` is not fired
+      // — the host page subscribed to answers, not to reasoning.
+      if (props.thinkingLabel !== '') pushStep(m, kind)
+      return
+    }
     isTyping.value = false
+    settleLog()
     upsert(m)
     emit('message', m)
   })
   client.on('stream', (m) => {
     if (gen !== connectGen) return
     isTyping.value = false
+    // The answer has started, so no further note belongs to the thinking
+    // phase — but the turn is still open, because a tool note may yet arrive
+    // between two chunks of it.
     upsert(m)
   })
   client.on('stream_end', (m) => {
     if (gen !== connectGen) return
+    settleLog()
     upsert(m)
     emit('message', m)
   })
@@ -426,6 +557,9 @@ function send(): void {
     parts,
     ts: Date.now(),
   })
+  // The previous turn is over the moment the visitor speaks again, whatever
+  // the runtime did or failed to do with it.
+  settleLog()
   isTyping.value = true
   client.send(text, parts)
   draft.value = ''
@@ -848,6 +982,7 @@ async function startNewChat(): Promise<void> {
   messages.value = []
   greetingShown.value = false
   isTyping.value = false
+  settleLog()
   connectionError.value = null
   // Suppress the next transcript replay too — belt-and-braces in case the
   // archive endpoint was a no-op (older hub without the override) and the
@@ -1149,8 +1284,97 @@ defineExpose({
           :key="m.id"
           :class="['bridle__msg', `bridle__msg--${m.role}`]"
         >
+          <!--
+            The work log: one collapsed row per turn holding what the agent
+            thought and which tools it reached for, opened only if the visitor
+            asks for it. Not a bubble — this is the agent talking to itself,
+            and it must not read like an answer.
+          -->
           <div
-            v-if="m.role === 'assistant'"
+            v-if="m.steps"
+            class="bridle__log"
+            :data-live="m.live ? 'true' : 'false'"
+            :data-open="openLogs.has(m.id) ? 'true' : 'false'"
+          >
+            <button
+              type="button"
+              class="bridle__log-toggle"
+              :aria-expanded="openLogs.has(m.id)"
+              @click="toggleLog(m.id)"
+            >
+              <span
+                v-if="m.live"
+                class="bridle__log-spinner"
+                aria-hidden="true"
+              />
+              <svg
+                v-else
+                viewBox="0 0 24 24"
+                width="13"
+                height="13"
+                aria-hidden="true"
+                class="bridle__log-icon"
+              >
+                <path
+                  d="M12 3l1.9 4.6L18.5 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9L12 3z"
+                  fill="currentColor"
+                />
+              </svg>
+              <span class="bridle__log-summary" :title="logSummary(m)">{{ logSummary(m) }}</span>
+              <span class="bridle__log-count">· {{ stepCount(m) }}</span>
+              <svg
+                viewBox="0 0 24 24"
+                width="14"
+                height="14"
+                aria-hidden="true"
+                class="bridle__log-chevron"
+              >
+                <path
+                  d="M9 6l6 6-6 6"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </button>
+
+            <div v-if="openLogs.has(m.id)" class="bridle__log-steps">
+              <div
+                v-for="step in (m.steps as IBridleThinkingStep[])"
+                :key="step.id"
+                class="bridle__log-step"
+              >
+                <span
+                  v-if="step.running"
+                  class="bridle__log-spinner bridle__log-spinner--step"
+                  aria-hidden="true"
+                />
+                <svg
+                  v-else
+                  viewBox="0 0 24 24"
+                  width="12"
+                  height="12"
+                  aria-hidden="true"
+                  class="bridle__log-check"
+                >
+                  <path
+                    d="M4 12.5l5 5L20 6.5"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2.5"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+                <span class="bridle__log-step-text">{{ step.text }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div
+            v-else-if="m.role === 'assistant'"
             class="bridle__bubble bridle__bubble--md"
           >
             <div
@@ -1921,6 +2145,109 @@ defineExpose({
 :host([data-color-mode="dark"]) .bridle__bubble--md :where(code),
 :host([data-color-mode="dark"]) .bridle__bubble--md :where(pre) {
   background: rgba(255, 255, 255, 0.08);
+}
+
+/* ── Work log ──────────────────────────────────────────────────────────
+   One row per turn, quieter than a bubble on purpose: it is the agent
+   thinking, and it competes with the answer for attention if it looks the
+   same. Full width up to a limit so a long thought truncates instead of
+   wrapping the row into a paragraph. */
+.bridle__log {
+  width: 100%;
+  max-width: 340px;
+  overflow: hidden;
+  border: 1px solid var(--bridle-border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bridle-bubble-bg) 55%, transparent);
+}
+
+.bridle__log-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--bridle-muted);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.bridle__log-toggle:hover { background: var(--bridle-bubble-bg); }
+
+.bridle__log-icon { flex: none; opacity: 0.8; }
+
+.bridle__log-summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bridle__log-count {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+
+.bridle__log-chevron {
+  flex: none;
+  transition: transform 0.15s ease;
+}
+.bridle__log[data-open='true'] .bridle__log-chevron { transform: rotate(90deg); }
+
+.bridle__log-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 2px 10px 10px;
+}
+
+.bridle__log-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--bridle-muted);
+}
+
+.bridle__log-step-text {
+  min-width: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.bridle__log-check {
+  flex: none;
+  margin-top: 2px;
+  color: #10b981;
+}
+
+/* The spinner is the liveness signal in the collapsed row; the caption next
+   to it is the one that actually says what is happening. */
+.bridle__log-spinner {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border: 2px solid color-mix(in srgb, var(--bridle-primary) 35%, transparent);
+  border-top-color: var(--bridle-primary);
+  border-radius: 50%;
+  animation: bridle-log-spin 0.7s linear infinite;
+}
+.bridle__log-spinner--step { margin-top: 2px; }
+
+@keyframes bridle-log-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bridle__log-spinner { animation-duration: 2.4s; }
 }
 
 .bridle__typing {

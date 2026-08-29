@@ -19,6 +19,22 @@ The runtime version imports from the channel domain (`IChannelGateway`, `Message
 
 See [PROTOCOL.md](../docs/PROTOCOL.md) for the wire format, event schemas, and streaming model.
 
+## Showing your work
+
+An agent that reasons before answering can say so out loud. `note()` sends one
+line of that reasoning; the browser collects the notes of a turn into a single
+collapsible **work log** above the answer, never into the answer itself.
+
+```ts
+await channel.note(clientId, 'The user wants their order status — I need the id first.')
+await channel.note(clientId, '→ lookupOrder', 'tool')
+await channel.streamSend(clientId, (onChunk) => llm.stream(onChunk))
+```
+
+Send notes between `typing` and the end of the stream: that window is what
+marks them as notes even for receivers that ignore the `kind` field. Details in
+[PROTOCOL.md § Notes](../docs/PROTOCOL.md#notes-agent-reasoning).
+
 ## Optional demo handlers (`bridle.demo.ts`)
 
 Drop-in helpers that wire showcase flows onto your agent without boilerplate. Import only what you need.
