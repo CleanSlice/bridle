@@ -2,7 +2,7 @@
 import { onMounted, onBeforeUnmount, ref } from 'vue'
 
 const API_URL = 'https://api.ranch.cleanslice.org'
-const AGENT_ID = 'agent-74c579f3-4700-4531-84f6-f8a621f98fa3'
+const AGENT_ID = 'agent-99c9f935-1bff-4f1f-a9a8-cc09bb3e6011'
 
 const mountEl = ref<HTMLDivElement | null>(null)
 const error = ref<string | null>(null)
@@ -12,17 +12,15 @@ onMounted(async () => {
   if (typeof window === 'undefined' || !mountEl.value) return
 
   try {
-    // Variable indirection so Rollup doesn't try to resolve the URL at
-    // build time. /sdk/latest.mjs is served from public/ at runtime.
-    const sdkUrl = '/sdk/latest.mjs'
-    const mod = await import(/* @vite-ignore */ sdkUrl)
-    instance = mod.init({
+    // Imported dynamically (not top-level) so VitePress's SSR build never
+    // evaluates the SDK, which touches `window`/`document` on load.
+    const { init } = await import('@cleanslice/bridle')
+    instance = init({
       apiUrl: API_URL,
       agentId: AGENT_ID,
       mount: mountEl.value,
       mode: 'inline',
-      title: 'Bridle demo',
-      placeholder: 'Ask the demo bot anything…',
+      // Title, greeting and placeholder come from the agent's own config.
       theme: 'cleanslice',
       colorMode: 'auto',
       onError: (err: Error) => {

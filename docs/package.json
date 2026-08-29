@@ -15,6 +15,7 @@
     "start": "vitepress preview docs --port ${PORT:-4173} --host 0.0.0.0"
   },
   "dependencies": {
+    "@cleanslice/bridle": "^0.14.0",
     "vitepress": "^1.6.4"
   }
 }
