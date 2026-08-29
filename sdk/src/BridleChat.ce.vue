@@ -156,6 +156,32 @@ const messages = ref<IBridleMessage[]>([])
 const isConnected = ref(false)
 const isTyping = ref(false)
 const connectionError = ref<BridleAuthError | Error | null>(null)
+// What the error banner actually renders. The hub often rejects the very
+// first handshake (host page's auth token arrives a beat after mount), then
+// the automatic reconnect succeeds — a raw `connectionError` would flash the
+// red banner for ~1s on every load. Only surface an error still standing
+// after ERROR_SETTLE_MS; until then the header shows a spinner instead of
+// the red dot. Must stay BELOW socket.io's reconnectionDelay (2000ms) or
+// each retry's fresh error would reset the timer and a genuine failure
+// would never surface.
+const ERROR_SETTLE_MS = 1500
+const displayedError = ref<BridleAuthError | Error | null>(null)
+let errorSettleTimer: ReturnType<typeof setTimeout> | null = null
+
+watch(connectionError, (err) => {
+  if (errorSettleTimer) {
+    clearTimeout(errorSettleTimer)
+    errorSettleTimer = null
+  }
+  if (!err) {
+    displayedError.value = null
+    return
+  }
+  errorSettleTimer = setTimeout(() => {
+    errorSettleTimer = null
+    displayedError.value = connectionError.value
+  }, ERROR_SETTLE_MS)
+})
 const isOpen = ref(props.mode === 'inline' || coerceBool(props.defaultOpen))
 const draft = ref('')
 const attachments = ref<IBridleAttachment[]>([])
@@ -922,6 +948,10 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   unbindAutoColorMode()
   cancelGreetingTimer()
+  if (errorSettleTimer) {
+    clearTimeout(errorSettleTimer)
+    errorSettleTimer = null
+  }
   if (typeof document !== 'undefined') {
     document.removeEventListener('click', onDocClick)
     document.removeEventListener('keydown', onDocKeydown)
@@ -986,11 +1016,24 @@ defineExpose({
       <header class="bridle__header">
         <span class="bridle__title">{{ title }}</span>
         <span
-          class="bridle__status"
-          :class="isConnected ? 'bridle__status--ok' : 'bridle__status--bad'"
-          :title="isConnected ? 'Connected' : 'Disconnected'"
+          v-if="isConnected"
+          class="bridle__status bridle__status--ok"
+          title="Connected"
           aria-hidden="true"
         >●</span>
+        <span
+          v-else-if="displayedError"
+          class="bridle__status bridle__status--bad"
+          title="Disconnected"
+          aria-hidden="true"
+        >●</span>
+        <span
+          v-else
+          class="bridle__status-spinner"
+          title="Connecting…"
+          role="status"
+          aria-label="Connecting"
+        />
         <div ref="menuEl" class="bridle__menu">
           <button
             type="button"
@@ -1040,26 +1083,26 @@ defineExpose({
       </header>
 
       <div
-        v-if="connectionError"
+        v-if="displayedError"
         class="bridle__banner bridle__banner--error"
         role="alert"
       >
-        <template v-if="(connectionError as BridleAuthError).code === 'ORIGIN_NOT_ALLOWED'">
+        <template v-if="(displayedError as BridleAuthError).code === 'ORIGIN_NOT_ALLOWED'">
           Origin
-          <code>{{ (connectionError as BridleAuthError).details?.origin || 'this page' }}</code>
+          <code>{{ (displayedError as BridleAuthError).details?.origin || 'this page' }}</code>
           isn't whitelisted for this agent. Add it in the agent's allowed origins.
         </template>
-        <template v-else-if="(connectionError as BridleAuthError).code === 'MISSING_TOKEN'">
+        <template v-else-if="(displayedError as BridleAuthError).code === 'MISSING_TOKEN'">
           Authentication required — provide a JWT via <code>data-token</code>.
         </template>
-        <template v-else-if="(connectionError as BridleAuthError).code === 'INVALID_TOKEN'">
+        <template v-else-if="(displayedError as BridleAuthError).code === 'INVALID_TOKEN'">
           The provided token is invalid or expired.
         </template>
-        <template v-else-if="(connectionError as BridleAuthError).code === 'MISSING_AGENT_ID'">
+        <template v-else-if="(displayedError as BridleAuthError).code === 'MISSING_AGENT_ID'">
           Missing <code>agent-id</code> on the embed script.
         </template>
         <template v-else>
-          {{ connectionError.message || 'Connection error' }}
+          {{ displayedError.message || 'Connection error' }}
         </template>
       </div>
 
@@ -1563,6 +1606,22 @@ defineExpose({
 .bridle__status { font-size: 10px; line-height: 1; }
 .bridle__status--ok { color: #16a34a; }
 .bridle__status--bad { color: #dc2626; }
+
+/* Lightweight loader shown in place of the status dot while the socket is
+   still authenticating/connecting — before we know whether it's ok or bad. */
+.bridle__status-spinner {
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 2px solid var(--bridle-border);
+  border-top-color: var(--bridle-muted);
+  animation: bridle-spin 0.8s linear infinite;
+}
+
+@keyframes bridle-spin {
+  to { transform: rotate(360deg); }
+}
 
 .bridle__close {
   background: transparent;
