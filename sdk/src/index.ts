@@ -107,6 +107,8 @@ function init(opts: IBridleInitOptions): IBridleInstance {
   if (opts.mode) el.setAttribute('mode', opts.mode)
   if (opts.title) el.setAttribute('title', opts.title)
   if (opts.placeholder) el.setAttribute('placeholder', opts.placeholder)
+  if (opts.accept) el.setAttribute('accept', opts.accept)
+  if (opts.uploadUrl) el.setAttribute('upload-url', opts.uploadUrl)
   if (opts.theme) el.setAttribute('theme', opts.theme)
   if (opts.colorMode) el.setAttribute('color-mode', opts.colorMode)
   if (opts.prompt) el.setAttribute('prompt', opts.prompt)
@@ -223,6 +225,8 @@ function autoMount(): void {
     mode: (ds.mode as 'floating' | 'inline' | undefined) ?? 'floating',
     title: ds.title,
     placeholder: ds.placeholder,
+    accept: ds.accept,
+    uploadUrl: ds.uploadUrl,
     theme: ds.theme as 'default' | 'cleanslice' | undefined,
     colorMode: ds.colorMode as 'auto' | 'light' | 'dark' | undefined,
     prompt: ds.prompt,

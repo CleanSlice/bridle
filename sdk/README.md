@@ -26,6 +26,8 @@ The script auto-mounts a floating chat bubble in the bottom-right corner. If the
 | `data-mount` | `<body>` | CSS selector for inline mode |
 | `data-title` | `Agent Chat` | Header text |
 | `data-placeholder` | `Type a message...` | Input placeholder |
+| `data-accept` | `image/*` | File types the attachment picker offers |
+| `data-upload-url` | optional | Endpoint that stores a non-image attachment and answers with its URL |
 | `data-custom-css` | optional | Inline CSS injected into the shadow root |
 | `data-stylesheet` | optional | Stylesheet URL(s) loaded into the shadow root (comma-separate for multiple) |
 
@@ -119,6 +121,29 @@ bridle-chat {
 The element uses Shadow DOM, so host page styles never bleed in and component styles never bleed out.
 
 ### Restyling internal elements
+
+## Attachments
+
+Images ride inside the message as base64 and need no configuration.
+
+Anything else is carried by the protocol as `{ type: 'file', url, name, mimeType }`
+— a URL, not bytes — and the hub does not host files. So a document attachment
+needs two things: a picker that offers the type, and somewhere to put it.
+
+```js
+init({
+  agentId: 'bot-abc-123',
+  accept: 'image/*,application/pdf,.docx,.xlsx',
+  uploadUrl: 'https://your-api.example.com/api/agent/bot-abc-123/attachment',
+});
+```
+
+`uploadUrl` receives `POST` as `multipart/form-data` with the file in a `file`
+field, and answers `{ url, name?, mimeType? }` — or the same object under a
+`data` key. The `token` given to `init` is forwarded as `Authorization`.
+
+Widen `accept` without `uploadUrl` and the widget says so next to the input
+rather than dropping the file quietly. Limits stay as they were: 5 attachments per message, 10 MB each.
 
 `themeVars` covers the design tokens (colors, radius, shadow, etc.). To override the actual class rules (`.bridle__panel`, `.bridle__bubble`, ...), inject your own CSS into the shadow root via `customCss` or `stylesheets`:
 
