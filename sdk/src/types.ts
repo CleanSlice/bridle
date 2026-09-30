@@ -188,6 +188,29 @@ export interface IBridleInitOptions {
    */
   stylesheets?: string | string[]
   /**
+   * `accept` attribute for the attachment picker. Defaults to `image/*`,
+   * which is everything the widget can send inline.
+   *
+   * Widening this only changes what the file dialog offers. A picked file
+   * that is not an image needs `uploadUrl` — without it the widget says so
+   * rather than dropping the file quietly.
+   */
+  accept?: string
+  /**
+   * Endpoint that stores a non-image attachment and answers with its URL.
+   *
+   * Bridle's protocol carries documents as `{ type: 'file', url, name,
+   * mimeType }`, so the bytes have to live somewhere the agent can fetch
+   * them; the hub deliberately does not host them. Point this at whatever
+   * does in your deployment.
+   *
+   * Contract: `POST <uploadUrl>` as `multipart/form-data` with the file in
+   * a `file` field, answering `{ url, name?, mimeType? }` — or the same
+   * object under a `data` key, which is what an envelope-style API returns.
+   * The bearer token passed to `init` is forwarded as `Authorization`.
+   */
+  uploadUrl?: string
+  /**
    * URL of the icon shown on the floating FAB in place of the built-in
    * chat-bubble glyph. Any URL the browser can render in `<img>` works —
    * `.svg`, `.png`, `.webp`, or a `data:` URI. Floating mode only.
