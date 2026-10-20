@@ -27,6 +27,7 @@ enum BridlePartTypes {
   Text = 'text',
   Image = 'image',
   File = 'file',
+  Context = 'context',
 }
 ```
 
@@ -55,6 +56,21 @@ Supported media types: `image/jpeg`, `image/png`, `image/gif`, `image/webp`.
 | `url` | string | yes | URL to download the file |
 | `name` | string | yes | Display name |
 | `mimeType` | string | no | MIME type hint |
+
+### Context Part
+
+What a message is **about**, beside what it says — the block of a page the person pointed at, the record they had open. Clients draw it as a plaque above the words (label, then the excerpt in quotes), never as words.
+
+```json
+{ "type": "context", "label": "Hero", "text": "Your roof fixed in a day" }
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `label` | string | yes | What it is, short |
+| `text` | string | no | An excerpt of it |
+
+Bridle only draws it. Which context an integrator attaches, and how it is carried to an agent that takes plain text, is the integrator's: the hub forwards parts as-is.
 
 ### Backward Compatibility
 

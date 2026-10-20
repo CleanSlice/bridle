@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { BridlePartTypes, type IBridleMessageData } from '../../stores/bridle'
-import { Bot, User, FileText } from 'lucide-vue-next'
+import { Bot, User, FileText, PanelTop } from 'lucide-vue-next'
 import { cn } from '#theme/utils/cn'
 
 defineProps<{
@@ -36,6 +36,20 @@ defineProps<{
     >
       <template v-for="(part, i) in message.parts" :key="i">
         <p v-if="part.type === BridlePartTypes.Text" class="whitespace-pre-wrap break-words">{{ part.text }}</p>
+
+        <!-- What the message is about: a plaque, never part of the words. -->
+        <div
+          v-else-if="part.type === BridlePartTypes.Context"
+          class="flex min-w-0 max-w-full items-center gap-1.5 rounded-md border border-current/20 px-2 py-1 text-xs"
+          data-testid="bridle-context"
+          :title="part.text ? `${part.label} · “${part.text}”` : part.label"
+        >
+          <PanelTop class="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden="true" />
+          <span class="min-w-0 truncate">
+            <span class="font-medium">{{ part.label }}</span>
+            <template v-if="part.text"> · “{{ part.text }}”</template>
+          </span>
+        </div>
 
         <img
           v-else-if="part.type === BridlePartTypes.Image"
