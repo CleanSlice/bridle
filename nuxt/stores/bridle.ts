@@ -5,6 +5,7 @@ export enum BridlePartTypes {
   Text = 'text',
   Image = 'image',
   File = 'file',
+  Context = 'context',
 }
 
 export interface IBridleTextPart {
@@ -25,7 +26,21 @@ export interface IBridleFilePart {
   mimeType?: string
 }
 
-export type BridlePart = IBridleTextPart | IBridleImagePart | IBridleFilePart
+// ── Context part ─────────────────────────────────────────────
+// What a message is about, beside what it says: the block of a page the
+// person pointed at, the record they had open. Drawn as a plaque above the
+// words, never as words. Whoever sends it chose the label; bridle only draws
+// it. Producing it — and taking it back out of a stored transcript — is the
+// integrator's business. See docs/PROTOCOL.md § Context Part.
+export interface IBridleContextPart {
+  type: BridlePartTypes.Context
+  /** What it is, short: "Hero", "Order #1042". */
+  label: string
+  /** An excerpt of it, when there is one. */
+  text?: string
+}
+
+export type BridlePart = IBridleTextPart | IBridleImagePart | IBridleFilePart | IBridleContextPart
 
 // ── Work log (the agent's reasoning) ──────────────────────────
 // An agent that reasons out loud sends those lines as ordinary `message`
@@ -86,7 +101,7 @@ function buildParts(text: string, images?: Array<{ base64: string; mediaType: st
 function hasVisibleContent(text: string, parts: BridlePart[]): boolean {
   if (text && text.trim().length > 0) return true
   return parts.some(p => {
-    if (p.type === BridlePartTypes.Image || p.type === BridlePartTypes.File) return true
+    if (p.type === BridlePartTypes.Image || p.type === BridlePartTypes.File || p.type === BridlePartTypes.Context) return true
     return p.type === BridlePartTypes.Text && p.text.trim().length > 0
   })
 }

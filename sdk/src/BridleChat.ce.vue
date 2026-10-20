@@ -11,6 +11,7 @@ import type {
   IBridleThinkingStep,
   IBridleUiPart,
   IBridleUiSubmitPart,
+  IBridleContextPart,
 } from './types'
 
 interface IBridleAttachment {
@@ -732,6 +733,10 @@ function uiParts(m: IBridleMessage): IBridleUiPart[] {
   return m.parts.filter((p): p is IBridleUiPart => p.type === 'ui')
 }
 
+function contextParts(m: IBridleMessage): IBridleContextPart[] {
+  return m.parts.filter((p): p is IBridleContextPart => p.type === 'context')
+}
+
 function uiSubmitParts(m: IBridleMessage): IBridleUiSubmitPart[] {
   return m.parts.filter((p): p is IBridleUiSubmitPart => p.type === 'ui_submit')
 }
@@ -1378,6 +1383,15 @@ defineExpose({
             class="bridle__bubble bridle__bubble--md"
           >
             <div
+              v-for="(p, i) in contextParts(m)"
+              :key="`ctx-${i}`"
+              class="bridle__msg-context"
+              :title="p.text ? `${p.label} · “${p.text}”` : p.label"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18" /></svg>
+              <span><b>{{ p.label }}</b><template v-if="p.text"> · “{{ p.text }}”</template></span>
+            </div>
+            <div
               v-for="(p, i) in imageParts(m)"
               :key="`img-${i}`"
               class="bridle__msg-image"
@@ -1529,6 +1543,15 @@ defineExpose({
             </form>
           </div>
           <div v-else class="bridle__bubble">
+            <div
+              v-for="(p, i) in contextParts(m)"
+              :key="`ctx-${i}`"
+              class="bridle__msg-context"
+              :title="p.text ? `${p.label} · “${p.text}”` : p.label"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18" /></svg>
+              <span><b>{{ p.label }}</b><template v-if="p.text"> · “{{ p.text }}”</template></span>
+            </div>
             <div
               v-for="(p, i) in imageParts(m)"
               :key="`img-${i}`"
@@ -2430,6 +2453,38 @@ defineExpose({
   font-size: 14px;
   font-weight: 600;
   color: var(--bridle-primary);
+}
+
+/* ---- Context parts: what a message is about, as a plaque ---- */
+.bridle__msg-context {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  margin-bottom: 6px;
+  padding: 4px 8px;
+  border: 1px solid currentColor;
+  border-color: color-mix(in srgb, currentColor 20%, transparent);
+  border-radius: 6px;
+  font-size: 12px;
+}
+.bridle__msg-context svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  opacity: 0.7;
+}
+.bridle__msg-context span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bridle__msg-context b {
+  font-weight: 600;
 }
 
 /* ---- Image parts inside message bubbles ---- */

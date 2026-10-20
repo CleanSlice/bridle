@@ -7,6 +7,22 @@ export type BridlePart =
   | { type: 'file'; url: string; name: string; mimeType?: string }
   | IBridleUiPart
   | IBridleUiSubmitPart
+  | IBridleContextPart
+
+// ── Context part ─────────────────────────────────────────────
+// What a message is about, beside what it says: the block of a page the
+// person pointed at, the record they had open. Drawn as a plaque above the
+// words, never as words. Whoever sends it chose the label; bridle only draws
+// it. Producing it — and taking it back out of a stored transcript — is the
+// integrator's business. See docs/PROTOCOL.md § Context Part.
+
+export interface IBridleContextPart {
+  type: 'context'
+  /** What it is, short: "Hero", "Order #1042". */
+  label: string
+  /** An excerpt of it, when there is one. */
+  text?: string
+}
 
 // ── Interactive UI parts ──────────────────────────────────────
 // Agent → Browser: render an interactive form inside a bubble.
