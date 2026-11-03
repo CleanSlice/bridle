@@ -2,7 +2,8 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick, useHost } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import { BridleClient, BridleAuthError } from './client'
+import { BridleClient, BridleAuthError, isTokenRejection } from './client'
+import { TokenSource } from './token'
 import type {
   BridleMessageKind,
   BridlePart,
@@ -76,6 +77,14 @@ const props = withDefaults(
     apiUrl: string
     agentId: string
     token: string
+    /**
+     * Token PROVIDER (CLEAN-188). A JS property, not an attribute — `init({
+     * token: fn })` sets it. The widget calls it for the first token, ~60 s
+     * before each token's `exp`, and after the hub rejects one, so a visitor
+     * never sees an expired session while the provider works. When set,
+     * `token` is not needed.
+     */
+    tokenProvider?: () => string | Promise<string>
     title?: string
     placeholder?: string
     mode?: 'floating' | 'inline'
@@ -142,6 +151,12 @@ const props = withDefaults(
      * the reasoning entirely and show answers only.
      */
     thinkingLabel?: string
+    /** Banner text when the hub no longer accepts the visitor's token and renewing it failed. */
+    sessionExpiredLabel?: string
+    /** Banner button that asks for a new token and reconnects. */
+    reconnectLabel?: string
+    /** Banner button shown when the token is static and only a reload can get a new one. */
+    reloadLabel?: string
   }>(),
   {
     title: 'Agent Chat',
@@ -151,6 +166,9 @@ const props = withDefaults(
     theme: 'default',
     colorMode: 'auto',
     thinkingLabel: 'Work log',
+    sessionExpiredLabel: 'Your session has expired.',
+    reconnectLabel: 'Reconnect',
+    reloadLabel: 'Reload the page',
   },
 )
 
@@ -160,6 +178,12 @@ const emit = defineEmits<{
   error: [error: Error]
   open: []
   close: []
+  /**
+   * The hub rejected the token and the widget cannot get a new one itself (a
+   * static `token`, no provider). The host answers with `setToken()` or a new
+   * `token` attribute; the widget then reconnects keeping the conversation.
+   */
+  'token-expired': []
 }>()
 
 const messages = ref<IBridleMessage[]>([])
@@ -217,6 +241,15 @@ interface IUiFormState {
 const uiState = ref<Record<string, IUiFormState>>({})
 
 let client: BridleClient | null = null
+// One token source for the element's lifetime, so the cached token and its
+// renewal timer survive the reconnects of "New chat" and `setToken()`.
+const tokens = new TokenSource(props.token || undefined, props.tokenProvider)
+// Reactive mirror of `tokens.renewable` for the template and the error path.
+const canRenewToken = ref(tokens.renewable)
+// Messages the visitor sent while the socket was down (reconnecting after a
+// network drop or a token renewal). Shown at once, sent after the next
+// `welcome`, so nothing typed during a reconnect is lost.
+const outbox: { text: string; parts: BridlePart[] }[] = []
 // Bumped on every connect() so welcome / transcript callbacks from a stale
 // socket can detect they're outdated and bail. Without this, "New chat"
 // would race: the old socket's welcome event arrives just after we clear
@@ -408,7 +441,8 @@ function buildClient(): BridleClient {
   return new BridleClient({
     apiUrl: props.apiUrl,
     agentId: props.agentId,
-    token: props.token,
+    getToken: (options) => tokens.get(options),
+    canRefreshToken: canRenewToken.value,
     prompt: props.prompt,
   })
 }
@@ -421,7 +455,8 @@ async function connect(): Promise<void> {
   // in particular would otherwise resurrect the old transcript right
   // after "New chat" clears it.
   const gen = ++connectGen
-  client = buildClient()
+  const owner = buildClient()
+  client = owner
   client.on('open', () => {
     if (gen !== connectGen) return
     isConnected.value = true
@@ -436,9 +471,13 @@ async function connect(): Promise<void> {
     if (gen !== connectGen) return
     connectionError.value = err
     emit('error', err)
+    // Renewal is the client's job when there is a provider; a rejection that
+    // still reaches here with a static token is the host's cue to push one.
+    if (isSessionExpired(err) && !canRenewToken.value) emit('token-expired')
   })
   client.on('welcome', ({ clientId }) => {
     if (gen !== connectGen) return
+    flushOutbox(owner)
     // Hub assigns clientId from JWT sub (or 'admin' for admin tokens) and
     // the runtime persists the transcript at `bridle:<clientId>.jsonl`.
     // Replay it so the chat survives a page refresh — live messages keep
@@ -449,7 +488,7 @@ async function connect(): Promise<void> {
       skipNextTranscript = false
       return
     }
-    void loadTranscript(clientId, gen)
+    void loadTranscript(owner, clientId, gen)
   })
   client.on('typing', () => {
     if (gen !== connectGen) return
@@ -488,16 +527,57 @@ async function connect(): Promise<void> {
   await client.connect()
 }
 
-async function loadTranscript(channel: string, gen: number): Promise<void> {
+function isSessionExpired(err: unknown): boolean {
+  return err instanceof BridleAuthError && isTokenRejection(err.code)
+}
+
+/**
+ * Banner action for an expired session. With a provider: force a new token and
+ * reconnect. With a static token: ask the host again via `token-expired` — its
+ * `setToken()` reconnects through the token watcher.
+ */
+async function reconnectSession(): Promise<void> {
+  if (!canRenewToken.value) {
+    emit('token-expired')
+    return
+  }
+  try {
+    await tokens.get({ force: true })
+  } catch (err) {
+    connectionError.value = err instanceof Error ? err : new Error(String(err))
+    return
+  }
+  connectionError.value = null
+  await connect()
+}
+
+/** A new credential for the same visitor: reconnect, keep the conversation on screen. */
+function applyToken(token: string): void {
+  tokens.set(token)
+  connectionError.value = null
+  if (props.apiUrl && props.agentId) void connect()
+}
+
+function reloadPage(): void {
+  if (typeof window !== 'undefined') window.location.reload()
+}
+
+function flushOutbox(owner: BridleClient): void {
+  if (outbox.length > 0) isTyping.value = true
+  while (outbox.length > 0) {
+    const next = outbox.shift()!
+    owner.send(next.text, next.parts)
+  }
+}
+
+async function loadTranscript(owner: BridleClient, channel: string, gen: number): Promise<void> {
   if (!channel) return
   try {
     const url =
       `${props.apiUrl.replace(/\/$/, '')}` +
       `/api/agent/${encodeURIComponent(props.agentId)}/transcript` +
       `?channel=${encodeURIComponent(channel)}`
-    const headers: Record<string, string> = {}
-    if (props.token) headers.Authorization = `Bearer ${props.token}`
-    const res = await fetch(url, { headers })
+    const res = await owner.authorizedFetch(url)
     if (!res.ok) return
     // Bail if a newer connect() has started while this fetch was in
     // flight — the channel is stale and merging would re-populate a
@@ -560,8 +640,12 @@ function send(): void {
   // The previous turn is over the moment the visitor speaks again, whatever
   // the runtime did or failed to do with it.
   settleLog()
-  isTyping.value = true
-  client.send(text, parts)
+  if (isConnected.value) {
+    isTyping.value = true
+    client.send(text, parts)
+  } else {
+    outbox.push({ text, parts })
+  }
   draft.value = ''
   attachments.value = []
   // autoSize() set an inline height on growth; clearing the value alone
@@ -954,17 +1038,13 @@ async function startNewChat(): Promise<void> {
   // fall back to delete(); Ranch's controller moves the live JSONL to a
   // timestamped sibling so admins still have the conversation.
   const channel = client?.getClientId?.()
-  if (channel && props.apiUrl && props.agentId) {
+  if (client && channel && props.apiUrl && props.agentId) {
     try {
       const url =
         `${props.apiUrl.replace(/\/$/, '')}` +
         `/api/agent/${encodeURIComponent(props.agentId)}/transcript/archive` +
         `?channel=${encodeURIComponent(channel)}`
-      const headers: Record<string, string> = {}
-      if (typeof props.token === 'string' && props.token) {
-        headers.Authorization = `Bearer ${props.token}`
-      }
-      await fetch(url, { method: 'POST', headers })
+      await client.authorizedFetch(url, { method: 'POST' })
     } catch (err) {
       console.warn('[bridle] transcript archive failed (continuing):', err)
     }
@@ -1037,16 +1117,33 @@ watch(
   { deep: true },
 )
 
-// Reconnect when bot/token/api/prompt changes — useful for dynamic dashboards.
-// Token may be empty for public bots (auth via Origin whitelist).
+// Reconnect when bot/api/prompt changes — useful for dynamic dashboards.
+// A different agent is a different conversation, so the screen is cleared.
 watch(
-  () => [props.apiUrl, props.agentId, props.token, props.prompt],
+  () => [props.apiUrl, props.agentId, props.prompt],
   () => {
     if (!props.apiUrl || !props.agentId) return
     messages.value = []
     cancelGreetingTimer()
     greetingShown.value = false
     void connect()
+  },
+)
+
+// A new token (`setToken()` / the `token` attribute) is the same visitor with
+// a fresh credential: reconnect, keep the conversation on screen; the welcome
+// replay merges the transcript back in. Token may be empty for public bots.
+watch(
+  () => props.token,
+  (token) => applyToken(token ?? ''),
+)
+
+watch(
+  () => props.tokenProvider,
+  (provider) => {
+    tokens.setProvider(provider)
+    canRenewToken.value = tokens.renewable
+    if (provider && !isConnected.value && props.apiUrl && props.agentId) void connect()
   },
 )
 
@@ -1093,6 +1190,7 @@ onBeforeUnmount(() => {
   }
   client?.disconnect()
   client = null
+  tokens.dispose()
 })
 
 defineExpose({
@@ -1106,6 +1204,7 @@ defineExpose({
     draft.value = text
     send()
   },
+  setToken: applyToken,
 })
 </script>
 
@@ -1230,11 +1329,27 @@ defineExpose({
         <template v-else-if="(displayedError as BridleAuthError).code === 'MISSING_TOKEN'">
           Authentication required — provide a JWT via <code>data-token</code>.
         </template>
-        <template v-else-if="(displayedError as BridleAuthError).code === 'INVALID_TOKEN'">
-          The provided token is invalid or expired.
+        <template v-else-if="isSessionExpired(displayedError)">
+          {{ sessionExpiredLabel }}
+          <span class="bridle__banner-actions">
+            <button type="button" class="bridle__banner-action" @click="reconnectSession">
+              {{ reconnectLabel }}
+            </button>
+            <button
+              v-if="!canRenewToken"
+              type="button"
+              class="bridle__banner-action"
+              @click="reloadPage"
+            >
+              {{ reloadLabel }}
+            </button>
+          </span>
         </template>
         <template v-else-if="(displayedError as BridleAuthError).code === 'MISSING_AGENT_ID'">
           Missing <code>agent-id</code> on the embed script.
+        </template>
+        <template v-else-if="displayedError instanceof BridleAuthError">
+          Connection error
         </template>
         <template v-else>
           {{ displayedError.message || 'Connection error' }}
@@ -1593,7 +1708,7 @@ defineExpose({
           type="button"
           class="bridle__attach"
           aria-label="Attach image"
-          :disabled="!isConnected || attachments.length >= MAX_ATTACHMENTS"
+          :disabled="attachments.length >= MAX_ATTACHMENTS"
           @click="openFilePicker"
         >
           <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
@@ -1611,7 +1726,6 @@ defineExpose({
           ref="inputEl"
           v-model="draft"
           :placeholder="placeholder"
-          :disabled="!isConnected"
           rows="1"
           @input="autoSize"
           @keydown="onKeydown"
@@ -1619,7 +1733,7 @@ defineExpose({
         />
         <button
           type="submit"
-          :disabled="!isConnected || (!draft.trim() && attachments.length === 0)"
+          :disabled="!draft.trim() && attachments.length === 0"
         >
           <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
             <path
@@ -1929,6 +2043,20 @@ defineExpose({
   background: var(--bridle-error-bg);
   color: var(--bridle-error-fg);
   border-bottom-color: var(--bridle-error-border);
+}
+.bridle__banner-actions {
+  display: inline-flex;
+  gap: 8px;
+  margin-left: 8px;
+}
+.bridle__banner-action {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  padding: 1px 8px;
+  cursor: pointer;
 }
 .bridle__banner code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;

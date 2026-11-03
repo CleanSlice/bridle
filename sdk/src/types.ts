@@ -135,9 +135,14 @@ export interface IBridleInitOptions {
   agentId: string
   /**
    * JWT used to authenticate the browser to the hub. Pass a string for static
-   * tokens, or a function returning a string/Promise<string> for refresh.
-   * Omit when the bot is configured as public on the hub — the hub will
-   * accept the connection based on the request `Origin` header.
+   * tokens, or a function returning a string/Promise<string> for refresh:
+   * it is called once for the first token and again whenever the hub turns
+   * the current one away (`TOKEN_EXPIRED` / `INVALID_TOKEN` on reconnect, 401
+   * on HTTP), and the chat reconnects without clearing the conversation. A
+   * static string cannot be renewed — once it expires the chat stays rejected
+   * until the page reloads. Omit when the bot is configured as public on the
+   * hub — the hub will accept the connection based on the request `Origin`
+   * header.
    */
   token?: string | (() => string | Promise<string>)
   /**
@@ -231,10 +236,23 @@ export interface IBridleInitOptions {
    * drop the reasoning entirely and show answers only.
    */
   thinkingLabel?: string
+  /** Banner text when the session expired and could not be renewed. Default: "Your session has expired." */
+  sessionExpiredLabel?: string
+  /** Banner button that gets a new token and reconnects. Default: "Reconnect". */
+  reconnectLabel?: string
+  /** Banner button shown for a static token, which only a reload can replace. Default: "Reload the page". */
+  reloadLabel?: string
   /** Hooks for headless side effects in addition to the UI. */
   onReady?: () => void
   onMessage?: (message: IBridleMessage) => void
   onError?: (error: Error) => void
+  /**
+   * The hub rejected the token and the widget cannot get a new one itself —
+   * `token` is a static string. Answer with `instance.setToken(newToken)`;
+   * the widget reconnects and keeps the conversation. Not called when `token`
+   * is a provider function: the widget renews on its own.
+   */
+  onTokenExpired?: () => void
 }
 
 export interface IBridleInstance {
@@ -246,6 +264,12 @@ export interface IBridleInstance {
   close: () => void
   /** Programmatically send a user message. */
   sendMessage: (text: string) => void
+  /**
+   * Replace the token (for static-token integrations, typically from
+   * `onTokenExpired`). Reconnects with it and keeps the conversation on screen.
+   * Same as setting the element's `token` attribute.
+   */
+  setToken: (token: string) => void
   /** Tear down the widget and disconnect. */
   destroy: () => void
 }

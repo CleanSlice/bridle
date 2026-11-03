@@ -101,6 +101,7 @@ function init(opts: IBridleInitOptions): IBridleInstance {
     open?: () => void
     close?: () => void
     sendMessage?: (text: string) => void
+    tokenProvider?: () => string | Promise<string>
   }
   el.setAttribute('api-url', apiUrl)
   el.setAttribute('agent-id', opts.agentId)
@@ -129,21 +130,22 @@ function init(opts: IBridleInitOptions): IBridleInstance {
 
   applyThemeVars(el, opts.themeVars)
 
-  // Resolve the token. Static strings are set immediately; functions are called
-  // and the result is set when ready. The Vue prop-watcher inside the element
-  // triggers connect once token is non-empty. If no token is provided (public
-  // bot), set an empty string so the watcher still fires.
+  if (opts.sessionExpiredLabel) el.setAttribute('session-expired-label', opts.sessionExpiredLabel)
+  if (opts.reconnectLabel) el.setAttribute('reconnect-label', opts.reconnectLabel)
+  if (opts.reloadLabel) el.setAttribute('reload-label', opts.reloadLabel)
+
+  // A static token goes into the observable `token` attribute; setting it
+  // again later (`setToken`) reconnects with the new one. A function is kept
+  // as a PROVIDER on a JS property, not resolved once here: the element calls
+  // it for the first token and every renewal after that (CLEAN-188). No token
+  // (public bot) is an empty attribute.
   const setToken = (t: string): void => {
     el.setAttribute('token', t)
   }
-  if (opts.token === undefined) {
-    setToken('')
-  } else if (typeof opts.token === 'function') {
-    Promise.resolve(opts.token())
-      .then(setToken)
-      .catch((err) => opts.onError?.(err instanceof Error ? err : new Error(String(err))))
+  if (typeof opts.token === 'function') {
+    el.tokenProvider = opts.token
   } else {
-    setToken(opts.token)
+    setToken(opts.token ?? '')
   }
 
   // Mount target. CSS selector or HTMLElement; default = body.
@@ -175,12 +177,14 @@ function init(opts: IBridleInitOptions): IBridleInstance {
       opts.onError?.((e as unknown as CustomEvent<Error>).detail),
     )
   }
+  if (opts.onTokenExpired) el.addEventListener('token-expired', () => opts.onTokenExpired?.())
 
   return {
     element: el,
     open: () => el.open?.(),
     close: () => el.close?.(),
     sendMessage: (text: string) => el.sendMessage?.(text),
+    setToken,
     destroy: () => el.remove(),
   }
 }
@@ -233,6 +237,9 @@ function autoMount(): void {
     emptyTitle: ds.emptyTitle,
     emptySubtitle: ds.emptySubtitle,
     thinkingLabel: ds.thinkingLabel,
+    sessionExpiredLabel: ds.sessionExpiredLabel,
+    reconnectLabel: ds.reconnectLabel,
+    reloadLabel: ds.reloadLabel,
     suggestions: ds.suggestions ? parseSuggestionsAttr(ds.suggestions) : undefined,
     customCss: ds.customCss,
     stylesheets,
