@@ -20,7 +20,7 @@ The script auto-mounts a floating chat bubble in the bottom-right corner. If the
 | Attribute | Default | Description |
 |-----------|---------|-------------|
 | `data-agent-id` | required | Agent identifier registered on the hub |
-| `data-token` | optional | JWT for browser auth (omit for public agents) |
+| `data-token` | optional | JWT for browser auth (omit for public agents). Static — see [Token refresh](#token-refresh) |
 | `data-api-url` | inferred | Hub origin |
 | `data-mode` | `floating` | `floating` (FAB) or `inline` (mounted inside `data-mount`) |
 | `data-mount` | `<body>` | CSS selector for inline mode |
@@ -37,7 +37,7 @@ import { init } from '@cleanslice/bridle'
 const chat = init({
   apiUrl: 'https://your-hub.example.com',
   agentId: 'agent-abc-123',
-  token: () => fetchJwt(),     // string OR async function for refresh
+  token: () => fetchJwt(),     // token provider (recommended) or a static string
   mount: '#chat',              // CSS selector or HTMLElement
   mode: 'inline',
   title: 'Support',
@@ -50,8 +50,35 @@ const chat = init({
 chat.sendMessage('Hi!')
 chat.open()
 chat.close()
+chat.setToken(jwt)             // replace a static token; reconnects, keeps the chat
 chat.destroy()
 ```
+
+## Token refresh
+
+Embed tokens are short-lived on purpose (`POST /auth/embed/token` defaults to
+`15m`); the long-lived credential is your server-side API key. Pass a **token
+provider** and the widget keeps itself signed in:
+
+```js
+init({
+  apiUrl,
+  agentId,
+  token: () => fetch('/my-backend/bridle-token').then((r) => r.json()).then((j) => j.token),
+})
+```
+
+The provider is called for the first token, ~60 s before each token's `exp`,
+and after the hub rejects a token (`TOKEN_EXPIRED` / `INVALID_TOKEN`, HTTP
+`401`) — then the widget reconnects or retries once, keeping the conversation.
+If that fails too, the visitor sees "Your session has expired" with a
+**Reconnect** button instead of a raw error code.
+
+With a static string token the widget cannot renew: it fires `onTokenExpired`
+(`token-expired` on the element), and `chat.setToken(newJwt)` reconnects.
+Don't work around expiry with a long `expiresIn` — a long-lived browser JWT
+still expires, and leaks for longer. Full guide:
+[bridle.cleanslice.org/embed/npm#token-refresh](https://bridle.cleanslice.org/embed/npm#token-refresh).
 
 ## Work log (agent reasoning)
 

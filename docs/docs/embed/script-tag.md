@@ -20,7 +20,7 @@ When the script loads, it auto-registers a `<bridle-chat>` Custom Element and mo
 | Attribute | Default | Description |
 |-----------|---------|-------------|
 | `data-agent-id` | **required** | Bot identifier registered on the hub |
-| `data-token` | **required** | JWT for browser auth — signed by your backend |
+| `data-token` | **required** | JWT for browser auth — signed by your backend. A static attribute cannot be renewed: for sessions longer than the token's TTL use [`init()` with a token provider](/embed/npm#token-refresh), or set a new `token` attribute on `<bridle-chat>` when it fires `token-expired` |
 | `data-api-url` | inferred from script's origin | Hub URL, e.g. `https://hub.example.com` |
 | `data-mode` | `floating` | `floating` (FAB in corner) or `inline` (inside `data-mount`) |
 | `data-mount` | `<body>` | CSS selector for inline mode, e.g. `#chat-container` |
@@ -37,6 +37,9 @@ When the script loads, it auto-registers a `<bridle-chat>` Custom Element and mo
 | `data-empty-subtitle` | optional | Sub-line shown under `data-empty-title` |
 | `data-thinking-label` | `Work log` | Caption of the collapsed work-log row — the block holding the agent's reasoning for a turn. Set to an empty string to hide reasoning entirely. See [Work log](#work-log) |
 | `data-suggestions` | optional | Suggestion chips rendered on the empty state. Pipe-separated (`Q1|Q2|Q3`) or a JSON array string. Clicking a chip sends it as a user message |
+| `data-session-expired-label` | `Your session has expired.` | Banner text when the hub no longer accepts the token and it could not be renewed |
+| `data-reconnect-label` | `Reconnect` | Banner button that gets a new token and reconnects |
+| `data-reload-label` | `Reload the page` | Banner button shown for a static token |
 
 ## Choosing where to load the script from
 
