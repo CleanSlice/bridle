@@ -2,7 +2,12 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick, useHost } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import { BridleClient, BridleAuthError, isTokenRejection } from './client'
+import {
+  BridleClient,
+  BridleAuthError,
+  isTokenRejection,
+  DEFAULT_CAPABILITIES,
+} from './client'
 import { TokenSource } from './token'
 import type {
   BridleMessageKind,
@@ -19,8 +24,14 @@ interface IBridleAttachment {
   name: string
   size: number
   mediaType: string
-  base64: string
-  dataUrl: string
+  /** Inline image payload. Absent on documents, which travel as a URL. */
+  base64?: string
+  /** Thumbnail source for images. Absent on documents. */
+  dataUrl?: string
+  /** Where the uploaded document lives. Absent on inline images. */
+  url?: string
+  /** True while the upload is still in flight; the chip shows it. */
+  uploading?: boolean
 }
 
 // 5 attachments fits comfortably; bigger payloads start to choke the
@@ -87,6 +98,15 @@ const props = withDefaults(
     tokenProvider?: () => string | Promise<string>
     title?: string
     placeholder?: string
+    /**
+     * `accept` for the attachment picker. Defaults to `image/*`; widening it
+     * needs `uploadUrl`, since anything that is not an image travels as a URL.
+     */
+    accept?: string
+    /** Endpoint that stores a document and answers with its URL. See types.ts. */
+    uploadUrl?: string
+    /** Pictures in the conversation, both directions. See types.ts. */
+    enableImages?: boolean | string
     mode?: 'floating' | 'inline'
     /** Open the panel by default (floating mode). Honored once on mount. */
     defaultOpen?: boolean | string
@@ -161,6 +181,8 @@ const props = withDefaults(
   {
     title: 'Agent Chat',
     placeholder: 'Type a message...',
+    accept: 'image/*',
+    enableImages: true,
     mode: 'floating',
     defaultOpen: false,
     theme: 'default',
@@ -216,9 +238,19 @@ watch(connectionError, (err) => {
     displayedError.value = connectionError.value
   }, ERROR_SETTLE_MS)
 })
+const imagesEnabled = computed(() => coerceBoolTrue(props.enableImages))
+/**
+ * With pictures off the picker has nothing left to offer, unless the
+ * integrator pointed `uploadUrl` at somewhere documents can live.
+ */
+const showAttachments = computed(() => imagesEnabled.value || !!props.uploadUrl)
+
 const isOpen = ref(props.mode === 'inline' || coerceBool(props.defaultOpen))
 const draft = ref('')
 const attachments = ref<IBridleAttachment[]>([])
+// Why a picked file did not become an attachment. Shown next to the input:
+// a console warning is invisible to the person who just chose the file.
+const attachmentError = ref('')
 const isDraggingFile = ref(false)
 const dragCounter = ref(0)
 const scrollEl = ref<HTMLElement | null>(null)
@@ -272,6 +304,15 @@ let htmlObserver: MutationObserver | null = null
 
 function coerceBool(v: boolean | string): boolean {
   return v === true || v === 'true' || v === ''
+}
+
+/**
+ * The default-true counterpart of `coerceBool`. An absent attribute has to
+ * mean "on" here, so only an explicit false turns the flag off - and it
+ * arrives as the string "false" when it comes through an HTML attribute.
+ */
+function coerceBoolTrue(v: boolean | string | undefined): boolean {
+  return !(v === false || v === 'false')
 }
 
 function detectHostColorScheme(): 'light' | 'dark' {
@@ -444,6 +485,11 @@ function buildClient(): BridleClient {
     getToken: (options) => tokens.get(options),
     canRefreshToken: canRenewToken.value,
     prompt: props.prompt,
+    // Telling the agent we cannot render pictures is what stops them coming
+    // back; hiding the picker alone would only block the visitor's side.
+    capabilities: imagesEnabled.value
+      ? undefined
+      : DEFAULT_CAPABILITIES.filter((c) => c !== 'images'),
   })
 }
 
@@ -619,15 +665,23 @@ async function loadTranscript(owner: BridleClient, channel: string, gen: number)
 function send(): void {
   const text = draft.value.trim()
   if (!client) return
-  if (!text && attachments.value.length === 0) return
+  // An attachment whose upload has not landed has no URL yet, so it would go
+  // out as a broken part. It stays in the tray and rides the next send.
+  const ready = attachments.value.filter((a) => !a.uploading)
+  if (!text && ready.length === 0) return
 
-  // Image parts come first so the agent sees the image before the caption
+  // Attachment parts come first so the agent sees them before the caption
   // — matches how every chat client orders attached media + accompanying text.
-  const parts: BridlePart[] = attachments.value.map((a) => ({
-    type: 'image' as const,
-    base64: a.base64,
-    mediaType: a.mediaType,
-  }))
+  const parts: BridlePart[] = ready.map((a) =>
+    a.base64 !== undefined
+      ? { type: 'image' as const, base64: a.base64, mediaType: a.mediaType }
+      : {
+          type: 'file' as const,
+          url: a.url as string,
+          name: a.name,
+          mimeType: a.mediaType,
+        },
+  )
   if (text) parts.push({ type: 'text', text })
 
   upsert({
@@ -647,7 +701,8 @@ function send(): void {
     outbox.push({ text, parts })
   }
   draft.value = ''
-  attachments.value = []
+  attachments.value = attachments.value.filter((a) => a.uploading)
+  attachmentError.value = ''
   // autoSize() set an inline height on growth; clearing the value alone
   // leaves the textarea tall and empty. Drop the inline style so it falls
   // back to the rows="1" baseline.
@@ -710,29 +765,111 @@ async function fileToImagePart(
   }
 }
 
+/**
+ * Store a document and hand back the URL the agent will fetch it from.
+ *
+ * The protocol carries documents as a URL, not as bytes, and the hub does not
+ * host them — so this posts to whatever `uploadUrl` names. Both a bare body
+ * and one wrapped in `data` are accepted, because envelope-style APIs are
+ * common and the difference is not worth an extra option.
+ */
+async function uploadDocument(
+  file: File,
+): Promise<{ url: string; name: string; mimeType: string }> {
+  const body = new FormData()
+  body.append('file', file)
+  const headers: Record<string, string> = {}
+  if (props.token) headers.Authorization = `Bearer ${props.token}`
+
+  const res = await fetch(props.uploadUrl as string, { method: 'POST', body, headers })
+  if (!res.ok) throw new Error(`upload responded ${res.status}`)
+
+  const payload = (await res.json()) as Record<string, unknown>
+  const data = (payload.data ?? payload) as Record<string, unknown>
+  const url = typeof data.url === 'string' ? data.url : ''
+  if (!url) throw new Error('upload response carried no `url`')
+
+  return {
+    url,
+    name: typeof data.name === 'string' ? data.name : file.name,
+    mimeType:
+      typeof data.mimeType === 'string'
+        ? data.mimeType
+        : file.type || 'application/octet-stream',
+  }
+}
+
 async function addFiles(files: FileList | File[]): Promise<void> {
+  // The picker is hidden when attachments are off, but paste and drop reach
+  // this function directly - so the gate belongs here, not on the button.
+  if (!showAttachments.value) return
+  attachmentError.value = ''
+
   for (const file of Array.from(files)) {
-    if (attachments.value.length >= MAX_ATTACHMENTS) break
-    if (!file.type.startsWith('image/')) {
-      console.warn(`[bridle] skipping non-image attachment: ${file.name} (${file.type})`)
-      continue
+    if (attachments.value.length >= MAX_ATTACHMENTS) {
+      attachmentError.value = `Up to ${MAX_ATTACHMENTS} attachments per message.`
+      break
     }
     if (file.size > MAX_FILE_SIZE) {
-      console.warn(`[bridle] attachment too large: ${file.name} (${file.size} bytes)`)
+      attachmentError.value = `"${file.name}" is over the ${Math.round(MAX_FILE_SIZE / 1024 / 1024)} MB limit.`
       continue
     }
+
+    // Images ride along inside the message; everything else has to be hosted
+    // first, because a `file` part is a URL.
+    if (file.type.startsWith('image/')) {
+      try {
+        const { base64, mediaType } = await fileToImagePart(file)
+        attachments.value.push({
+          id: randomId(),
+          name: file.name,
+          size: file.size,
+          mediaType,
+          base64,
+          dataUrl: `data:${mediaType};base64,${base64}`,
+        })
+      } catch (err) {
+        console.warn(`[bridle] failed to read attachment ${file.name}:`, err)
+        attachmentError.value = `"${file.name}" could not be read.`
+      }
+      continue
+    }
+
+    if (!props.uploadUrl) {
+      attachmentError.value = `"${file.name}" can't be attached — this chat accepts images only.`
+      continue
+    }
+
+    // The chip appears immediately so the wait is visible; `send` skips any
+    // attachment still uploading, so an early Enter cannot ship a half-done one.
+    const pending: IBridleAttachment = {
+      id: randomId(),
+      name: file.name,
+      size: file.size,
+      mediaType: file.type || 'application/octet-stream',
+      uploading: true,
+    }
+    attachments.value.push(pending)
+
     try {
-      const { base64, mediaType } = await fileToImagePart(file)
-      attachments.value.push({
-        id: randomId(),
-        name: file.name,
-        size: file.size,
-        mediaType,
-        base64,
-        dataUrl: `data:${mediaType};base64,${base64}`,
-      })
+      const stored = await uploadDocument(file)
+      // Replace by index rather than mutating `pending`: the array is reactive,
+      // and writing to the object we pushed would bypass the proxy that the
+      // chip's render effect tracks — the spinner would never clear.
+      const idx = attachments.value.findIndex((a) => a.id === pending.id)
+      if (idx !== -1) {
+        attachments.value[idx] = {
+          ...attachments.value[idx],
+          url: stored.url,
+          name: stored.name,
+          mediaType: stored.mimeType,
+          uploading: false,
+        }
+      }
     } catch (err) {
-      console.warn(`[bridle] failed to read attachment ${file.name}:`, err)
+      console.warn(`[bridle] failed to upload attachment ${file.name}:`, err)
+      attachments.value = attachments.value.filter((a) => a.id !== pending.id)
+      attachmentError.value = `"${file.name}" could not be uploaded.`
     }
   }
 }
@@ -758,6 +895,7 @@ function openFilePicker(): void {
 // Drag overlay lives at the panel level. Counter avoids the classic
 // flicker where `dragleave` fires for every child element you pass over.
 function dragHasFiles(e: DragEvent): boolean {
+  if (!showAttachments.value) return false
   return !!e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files')
 }
 
@@ -810,6 +948,17 @@ function imageParts(m: IBridleMessage): Array<{ base64: string; mediaType: strin
   return m.parts
     .filter((p): p is { type: 'image'; base64: string; mediaType: string } => p.type === 'image')
     .map((p) => ({ base64: p.base64, mediaType: p.mediaType }))
+}
+
+function fileParts(
+  m: IBridleMessage,
+): Array<{ url: string; name: string; mimeType?: string }> {
+  return m.parts
+    .filter(
+      (p): p is { type: 'file'; url: string; name: string; mimeType?: string } =>
+        p.type === 'file',
+    )
+    .map((p) => ({ url: p.url, name: p.name, mimeType: p.mimeType }))
 }
 
 function uiParts(m: IBridleMessage): IBridleUiPart[] {
@@ -1503,6 +1652,14 @@ defineExpose({
                 loading="lazy"
               />
             </div>
+            <a
+              v-for="(p, i) in fileParts(m)"
+              :key="`file-${i}`"
+              class="bridle__msg-file"
+              :href="p.url"
+              target="_blank"
+              rel="noopener noreferrer"
+            >{{ p.name }}</a>
             <div v-if="m.text" v-html="renderMarkdown(m.text)" />
             <form
               v-for="(p, ui) in uiParts(m)"
@@ -1655,6 +1812,14 @@ defineExpose({
                 loading="lazy"
               />
             </div>
+            <a
+              v-for="(p, i) in fileParts(m)"
+              :key="`file-${i}`"
+              class="bridle__msg-file"
+              :href="p.url"
+              target="_blank"
+              rel="noopener noreferrer"
+            >{{ p.name }}</a>
             <div
               v-for="(p, i) in uiSubmitParts(m)"
               :key="`sub-${i}`"
@@ -1679,13 +1844,26 @@ defineExpose({
         <div class="bridle__drop-hint">Drop image to attach</div>
       </div>
 
+      <div v-if="attachmentError" class="bridle__attach-error" role="alert">
+        {{ attachmentError }}
+      </div>
+
       <div v-if="attachments.length" class="bridle__attachments">
         <div
           v-for="a in attachments"
           :key="a.id"
           class="bridle__attachment"
+          :class="{ 'bridle__attachment--file': !a.dataUrl }"
         >
-          <img :src="a.dataUrl" :alt="a.name" class="bridle__attachment-img" />
+          <img
+            v-if="a.dataUrl"
+            :src="a.dataUrl"
+            :alt="a.name"
+            class="bridle__attachment-img"
+          />
+          <span v-else class="bridle__attachment-name" :title="a.name">
+            {{ a.uploading ? 'Uploading…' : a.name }}
+          </span>
           <button
             type="button"
             class="bridle__attachment-remove"
@@ -1697,18 +1875,20 @@ defineExpose({
 
       <form class="bridle__input" @submit.prevent="send">
         <input
+          v-if="showAttachments"
           ref="fileInputEl"
           type="file"
-          accept="image/*"
+          :accept="accept"
           multiple
           class="bridle__file-input"
           @change="onFileChange"
         />
         <button
+          v-if="showAttachments"
           type="button"
           class="bridle__attach"
-          aria-label="Attach image"
-          :disabled="attachments.length >= MAX_ATTACHMENTS"
+          aria-label="Attach file"
+          :disabled="!isConnected || attachments.length >= MAX_ATTACHMENTS"
           @click="openFilePicker"
         >
           <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
@@ -2510,6 +2690,48 @@ defineExpose({
   overflow: hidden;
   border: 1px solid var(--bridle-border);
   background: var(--bridle-bg);
+}
+
+/* A document has no thumbnail, so the chip grows into a name plate instead
+   of leaving a 56px square blank. */
+.bridle__attachment--file {
+  width: auto;
+  max-width: 180px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  padding: 0 24px 0 10px;
+  background: var(--bridle-bg-elv);
+}
+
+.bridle__attachment-name {
+  font-size: 12px;
+  line-height: 1.3;
+  color: var(--bridle-fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bridle__attach-error {
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--bridle-danger, #b91c1c);
+  background: var(--bridle-bg-elv);
+  border-top: 1px solid var(--bridle-border);
+  flex-shrink: 0;
+}
+
+/* A file part arrives as a URL, so it renders as a plain download link —
+   there is nothing to preview without fetching the bytes. */
+.bridle__msg-file {
+  display: inline-block;
+  margin: 4px 0;
+  font-size: 13px;
+  color: var(--bridle-primary);
+  text-decoration: underline;
+  word-break: break-word;
 }
 
 .bridle__attachment-img {

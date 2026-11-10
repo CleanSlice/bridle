@@ -2,6 +2,9 @@ import { io, type Socket } from 'socket.io-client'
 import { TokenSource, type IGetTokenOptions, type TokenProvider } from './token'
 import type { BridleMessageKind, BridlePart, IBridleMessage } from './types'
 
+/** Everything the embed widget knows how to render. */
+export const DEFAULT_CAPABILITIES = ['streaming', 'images', 'files', 'ui']
+
 export interface IBridleClientOptions {
   apiUrl: string
   agentId: string
@@ -37,6 +40,13 @@ export interface IBridleClientOptions {
    * metadata. Static for the lifetime of the connection.
    */
   prompt?: string
+  /**
+   * What this client can render, sent at handshake and forwarded to the agent
+   * on every message. Defaults to everything the widget supports; narrow it to
+   * keep a part type away from this peer - dropping `'images'` is how an
+   * integrator turns picture replies off.
+   */
+  capabilities?: string[]
 }
 
 type EventName = 'open' | 'close' | 'error' | 'typing' | 'message' | 'stream' | 'stream_end' | 'welcome'
@@ -159,7 +169,7 @@ export class BridleClient {
     // What this client can render. The hub forwards the list to the agent
     // on every message — runtimes use it to skip part types this peer
     // can't display (e.g. don't emit `ui` parts to a Telegram client).
-    const capabilities = ['streaming', 'images', 'files', 'ui']
+    const capabilities = this.opts.capabilities ?? DEFAULT_CAPABILITIES
     const handshake = {
       agentId: this.opts.agentId,
       capabilities,
