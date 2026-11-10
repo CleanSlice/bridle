@@ -2,7 +2,12 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick, useHost } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import { BridleClient, BridleAuthError, isTokenRejection } from './client'
+import {
+  BridleClient,
+  BridleAuthError,
+  isTokenRejection,
+  DEFAULT_CAPABILITIES,
+} from './client'
 import { TokenSource } from './token'
 import type {
   BridleMessageKind,
@@ -100,6 +105,8 @@ const props = withDefaults(
     accept?: string
     /** Endpoint that stores a document and answers with its URL. See types.ts. */
     uploadUrl?: string
+    /** Pictures in the conversation, both directions. See types.ts. */
+    enableImages?: boolean | string
     mode?: 'floating' | 'inline'
     /** Open the panel by default (floating mode). Honored once on mount. */
     defaultOpen?: boolean | string
@@ -175,6 +182,7 @@ const props = withDefaults(
     title: 'Agent Chat',
     placeholder: 'Type a message...',
     accept: 'image/*',
+    enableImages: true,
     mode: 'floating',
     defaultOpen: false,
     theme: 'default',
@@ -230,6 +238,13 @@ watch(connectionError, (err) => {
     displayedError.value = connectionError.value
   }, ERROR_SETTLE_MS)
 })
+const imagesEnabled = computed(() => coerceBoolTrue(props.enableImages))
+/**
+ * With pictures off the picker has nothing left to offer, unless the
+ * integrator pointed `uploadUrl` at somewhere documents can live.
+ */
+const showAttachments = computed(() => imagesEnabled.value || !!props.uploadUrl)
+
 const isOpen = ref(props.mode === 'inline' || coerceBool(props.defaultOpen))
 const draft = ref('')
 const attachments = ref<IBridleAttachment[]>([])
@@ -289,6 +304,15 @@ let htmlObserver: MutationObserver | null = null
 
 function coerceBool(v: boolean | string): boolean {
   return v === true || v === 'true' || v === ''
+}
+
+/**
+ * The default-true counterpart of `coerceBool`. An absent attribute has to
+ * mean "on" here, so only an explicit false turns the flag off - and it
+ * arrives as the string "false" when it comes through an HTML attribute.
+ */
+function coerceBoolTrue(v: boolean | string | undefined): boolean {
+  return !(v === false || v === 'false')
 }
 
 function detectHostColorScheme(): 'light' | 'dark' {
@@ -461,6 +485,11 @@ function buildClient(): BridleClient {
     getToken: (options) => tokens.get(options),
     canRefreshToken: canRenewToken.value,
     prompt: props.prompt,
+    // Telling the agent we cannot render pictures is what stops them coming
+    // back; hiding the picker alone would only block the visitor's side.
+    capabilities: imagesEnabled.value
+      ? undefined
+      : DEFAULT_CAPABILITIES.filter((c) => c !== 'images'),
   })
 }
 
@@ -771,6 +800,9 @@ async function uploadDocument(
 }
 
 async function addFiles(files: FileList | File[]): Promise<void> {
+  // The picker is hidden when attachments are off, but paste and drop reach
+  // this function directly - so the gate belongs here, not on the button.
+  if (!showAttachments.value) return
   attachmentError.value = ''
 
   for (const file of Array.from(files)) {
@@ -863,6 +895,7 @@ function openFilePicker(): void {
 // Drag overlay lives at the panel level. Counter avoids the classic
 // flicker where `dragleave` fires for every child element you pass over.
 function dragHasFiles(e: DragEvent): boolean {
+  if (!showAttachments.value) return false
   return !!e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files')
 }
 
@@ -1842,6 +1875,7 @@ defineExpose({
 
       <form class="bridle__input" @submit.prevent="send">
         <input
+          v-if="showAttachments"
           ref="fileInputEl"
           type="file"
           :accept="accept"
@@ -1850,6 +1884,7 @@ defineExpose({
           @change="onFileChange"
         />
         <button
+          v-if="showAttachments"
           type="button"
           class="bridle__attach"
           aria-label="Attach file"

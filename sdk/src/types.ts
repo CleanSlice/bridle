@@ -216,6 +216,15 @@ export interface IBridleInitOptions {
    */
   uploadUrl?: string
   /**
+   * Pictures in the conversation, both directions. Defaults to `true`.
+   *
+   * `false` hides the attachment picker and refuses pasted or dropped
+   * images, and tells the agent this client cannot render them - so it stops
+   * sending picture replies too. Documents still work when `uploadUrl` is
+   * configured: the picker stays for them.
+   */
+  enableImages?: boolean
+  /**
    * URL of the icon shown on the floating FAB in place of the built-in
    * chat-bubble glyph. Any URL the browser can render in `<img>` works —
    * `.svg`, `.png`, `.webp`, or a `data:` URI. Floating mode only.

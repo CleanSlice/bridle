@@ -110,6 +110,10 @@ function init(opts: IBridleInitOptions): IBridleInstance {
   if (opts.placeholder) el.setAttribute('placeholder', opts.placeholder)
   if (opts.accept) el.setAttribute('accept', opts.accept)
   if (opts.uploadUrl) el.setAttribute('upload-url', opts.uploadUrl)
+  // Set only when the integrator said so: absent means the widget default (on).
+  if (opts.enableImages !== undefined) {
+    el.setAttribute('enable-images', String(opts.enableImages))
+  }
   if (opts.theme) el.setAttribute('theme', opts.theme)
   if (opts.colorMode) el.setAttribute('color-mode', opts.colorMode)
   if (opts.prompt) el.setAttribute('prompt', opts.prompt)
@@ -231,6 +235,7 @@ function autoMount(): void {
     placeholder: ds.placeholder,
     accept: ds.accept,
     uploadUrl: ds.uploadUrl,
+    enableImages: ds.enableImages === undefined ? undefined : ds.enableImages !== 'false',
     theme: ds.theme as 'default' | 'cleanslice' | undefined,
     colorMode: ds.colorMode as 'auto' | 'light' | 'dark' | undefined,
     prompt: ds.prompt,
