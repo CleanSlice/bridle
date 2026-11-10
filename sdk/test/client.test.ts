@@ -168,3 +168,52 @@ describe('BridleClient.authorizedFetch', () => {
     expect(calls).toEqual(['expired'])
   })
 })
+
+/*
+ * What the client says it can render. The hub forwards the list to the agent
+ * on every message, so narrowing it is what actually stops picture replies -
+ * hiding the widget's picker only closes the visitor's side of the door.
+ */
+describe('BridleClient capabilities', () => {
+  it('advertises everything the widget renders by default', async () => {
+    valid.add('t')
+    const { client } = startClient({ apiUrl: 'http://hub', agentId: 'a', getToken: async () => 't' })
+    await client.connect()
+    await flush()
+
+    expect(sockets[0].handshakes[0].capabilities).toEqual(['streaming', 'images', 'files', 'ui'])
+  })
+
+  it('sends the narrowed list when the integrator drops one', async () => {
+    valid.add('t')
+    const { client } = startClient({
+      apiUrl: 'http://hub',
+      agentId: 'a',
+      getToken: async () => 't',
+      capabilities: ['streaming', 'files', 'ui'],
+    })
+    await client.connect()
+    await flush()
+
+    expect(sockets[0].handshakes[0].capabilities).toEqual(['streaming', 'files', 'ui'])
+  })
+
+  it('repeats the narrowed list on every reconnect', async () => {
+    valid.add('t')
+    const { client } = startClient({
+      apiUrl: 'http://hub',
+      agentId: 'a',
+      getToken: async () => 't',
+      capabilities: ['streaming', 'files', 'ui'],
+    })
+    await client.connect()
+    await flush()
+    sockets[0].drop()
+    await flush()
+
+    expect(sockets[0].handshakes.map((h) => h.capabilities)).toEqual([
+      ['streaming', 'files', 'ui'],
+      ['streaming', 'files', 'ui'],
+    ])
+  })
+})
