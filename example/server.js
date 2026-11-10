@@ -30,10 +30,11 @@ const SDK_DIST = join(__dirname, '..', 'sdk', 'dist')
 const RANCH_API_URL = process.env.RANCH_API_URL || 'http://localhost:3333'
 const RANCH_API_KEY = process.env.RANCH_API_KEY || ''
 const BRIDLE_AGENT_ID = process.env.BRIDLE_AGENT_ID || ''
-// Bridle's default is 15m which is painful for dev — a refresh after lunch
-// shows "token expired". Allow the operator to override via env, and as
-// a last resort via `?expiresIn=...` on the request. Format: `<n>(s|m|h|d)`.
-const RANCH_EMBED_TOKEN_TTL = process.env.RANCH_EMBED_TOKEN_TTL || '7d'
+// Embed tokens stay short-lived (Ranch's default, 15m): the widgets that pass
+// a token provider renew on their own (CLEAN-188), so a long TTL would only
+// widen the window a leaked token works in. Override via env, or per request
+// with `?expiresIn=...` — `1m` is handy to watch the renewal. Format: `<n>(s|m|h|d)`.
+const RANCH_EMBED_TOKEN_TTL = process.env.RANCH_EMBED_TOKEN_TTL || '15m'
 
 if (!RANCH_API_KEY) {
   console.warn('[env] RANCH_API_KEY is unset — /embed/token will 500 until it is provided')

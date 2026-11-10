@@ -142,16 +142,18 @@
         <h2 class="mt-1 text-2xl font-semibold">Authenticator — token as a function</h2>
         <p class="mt-2 text-slate-600">
           Instead of a string in <code>token</code>, pass a function: the SDK
-          will call it and await the <code>Promise&lt;string&gt;</code>. Under
-          the hood the function hits your own backend for a fresh JWT — the
-          Ranch API key stays server-side.
+          calls it for the first token, ~60 s before each token expires and
+          after the hub rejects one, so the chat outlives the token's TTL.
+          Under the hood the function hits your own backend for a fresh JWT —
+          the Ranch API key stays server-side. Open this page with
+          <code>?ttl=1m</code> to watch the renewal.
         </p>
         <div class="mt-4 grid gap-4 md:grid-cols-2">
           <pre class="overflow-x-auto rounded-lg bg-slate-900 p-4 text-xs"><code>Bridle.init({
   apiUrl,
   agentId,
-  // called before connecting —
-  // re-mint the token here if needed
+  // called for the first token, before each
+  // token expires, and after a rejection
   token: async () =&gt; {
     const r = await fetch('/embed/token?sub=user-42')
     if (!r.ok) throw new Error(`token ${r.status}`)
@@ -369,11 +371,12 @@ bridle.onMessage(async (msg) =&gt; {
               mount: '#chat-authn',
               title: 'Auth via token()',
               token: async () => {
-                const r = await fetch('/embed/token?sub=demo-authn');
-                console.log('r', r)
+                // `?ttl=1m` on this page mints 1-minute tokens to watch the renewal.
+                const ttl = new URLSearchParams(location.search).get('ttl');
+                const r = await fetch('/embed/token?sub=demo-authn' + (ttl ? `&expiresIn=${encodeURIComponent(ttl)}` : ''));
                 if (!r.ok) throw new Error(`token ${r.status}`);
                 const { token } = await r.json();
-                console.log('token', token)
+                console.log('[bridle] authn token minted');
                 return token;
               },
               onReady: () => console.log('[bridle] authn ready'),
