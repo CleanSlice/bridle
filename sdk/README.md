@@ -28,6 +28,7 @@ The script auto-mounts a floating chat bubble in the bottom-right corner. If the
 | `data-placeholder` | `Type a message...` | Input placeholder |
 | `data-accept` | `image/*` | File types the attachment picker offers |
 | `data-upload-url` | optional | Endpoint that stores a non-image attachment and answers with its URL |
+| `data-enable-images` | `true` | Pictures in the conversation, both directions. `false` turns them off |
 | `data-custom-css` | optional | Inline CSS injected into the shadow root |
 | `data-stylesheet` | optional | Stylesheet URL(s) loaded into the shadow root (comma-separate for multiple) |
 
@@ -171,6 +172,24 @@ field, and answers `{ url, name?, mimeType? }` — or the same object under a
 
 Widen `accept` without `uploadUrl` and the widget says so next to the input
 rather than dropping the file quietly. Limits stay as they were: 5 attachments per message, 10 MB each.
+
+### Turning pictures off
+
+```js
+init({
+  agentId: 'bot-abc-123',
+  enableImages: false,
+});
+```
+
+This closes both directions. The picker disappears, and pasted or dropped
+images are refused rather than silently ignored — and the handshake stops
+advertising `images`, which is what tells the agent not to answer with one.
+Hiding the picker alone would only cover the visitor's side.
+
+Documents are unaffected: with `uploadUrl` configured the picker stays for
+them, so `enableImages: false` plus an upload endpoint gives a
+documents-only widget.
 
 `themeVars` covers the design tokens (colors, radius, shadow, etc.). To override the actual class rules (`.bridle__panel`, `.bridle__bubble`, ...), inject your own CSS into the shadow root via `customCss` or `stylesheets`:
 

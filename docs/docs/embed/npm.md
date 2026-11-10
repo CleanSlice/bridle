@@ -39,6 +39,9 @@ const chat = init({
 | `mode` | `'floating' \| 'inline'` | no | Default: `floating` |
 | `title` | string | no | Header text. Default: `Agent Chat` |
 | `placeholder` | string | no | Input placeholder |
+| `accept` | string | no | File types the attachment picker offers. Default: `image/*`. See [Attachments](#attachments) |
+| `uploadUrl` | string | no | Endpoint that stores a non-image attachment and answers with its URL |
+| `enableImages` | boolean | no | Pictures in the conversation, both directions. Default: `true` |
 | `theme` | `Record<string, string>` | no | CSS variable overrides |
 | `customCss` | string | no | Inline CSS injected into the shadow root. See [Theming › Overriding internal classes](/embed/theming#overriding-internal-classes) |
 | `stylesheets` | `string \| string[]` | no | Stylesheet URL(s) loaded into the shadow root as `<link rel="stylesheet">` |
@@ -66,6 +69,44 @@ interface IBridleInstance {
   destroy(): void           // Tear down and disconnect
 }
 ```
+
+## Attachments
+
+The picker offers images by default, and the widget sends them inline as
+base64. Anything else travels through the protocol as a URL — `{ type: 'file',
+url, name, mimeType }` — and the hub deliberately does not host files. So a
+document attachment needs two things: a picker that offers the type, and
+somewhere to put the bytes.
+
+```js
+init({
+  agentId: 'bot-abc-123',
+  accept: 'image/*,application/pdf,.docx',
+  uploadUrl: 'https://your-api.example.com/attachment',
+});
+```
+
+`uploadUrl` receives `POST` as `multipart/form-data` with the file in a `file`
+field and answers `{ url, name?, mimeType? }`, or the same object under a
+`data` key. The `token` given to `init()` is forwarded as `Authorization`.
+Widen `accept` without `uploadUrl` and the widget says so next to the input
+rather than dropping the file quietly. Limits: 5 attachments per message,
+10 MB each.
+
+### Turning pictures off
+
+```js
+init({ agentId: 'bot-abc-123', enableImages: false });
+```
+
+This closes both directions at once. The picker disappears and pasted or
+dropped images are refused — and, just as importantly, the handshake stops
+advertising the `images` capability, which is what tells the agent not to
+answer with one. Hiding the picker alone would only cover the visitor's side.
+
+Documents are unaffected: with `uploadUrl` configured the picker stays for
+them, so `enableImages: false` plus an upload endpoint gives a
+documents-only widget.
 
 ## Token refresh
 
