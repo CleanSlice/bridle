@@ -1,7 +1,21 @@
 name: Publish SDK
 
+# Publishes @cleanslice/bridle to npm through npm Trusted Publishing (OIDC):
+# no NPM_TOKEN, no 2FA, nothing to rotate. The trusted publisher on npmjs.com
+# is bound to this repo and this file name — renaming the file breaks it.
+#
+# Triggers:
+#   - push to main touching sdk/** — publishes only when sdk/package.json
+#     carries a version npm does not have yet (a version bump is the release);
+#   - tag sdk-v<version> — publishes, the tag must match sdk/package.json;
+#   - manual run — publishes with a chosen dist-tag, optionally --dry-run.
+
 on:
   push:
+    branches:
+      - main
+    paths:
+      - 'sdk/**'
     tags:
       - 'sdk-v*'
   workflow_dispatch:
@@ -15,6 +29,10 @@ on:
         type: boolean
         required: false
         default: false
+
+concurrency:
+  group: publish-sdk-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   publish:
@@ -30,8 +48,12 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           registry-url: 'https://registry.npmjs.org'
+
+      # Trusted Publishing needs npm >= 11.5.1; Node 22 ships npm 10.
+      - name: Upgrade npm
+        run: npm install -g npm@^11.5.1
 
       - name: Verify tag matches package version
         if: startsWith(github.ref, 'refs/tags/sdk-v')
@@ -45,11 +67,30 @@ jobs:
             exit 1
           fi
 
-      - run: npm ci
+      - name: Decide whether to publish
+        id: gate
+        run: |
+          PKG=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          if [ "${{ github.event_name }}" != "push" ] || [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "Publishing $VERSION (manual or tag trigger)"
+          elif npm view "$PKG@$VERSION" version >/dev/null 2>&1; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "$PKG@$VERSION is already on npm — bump sdk/package.json to release."
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "$PKG@$VERSION is not on npm yet — publishing."
+          fi
 
-      - run: npm run build
+      - if: steps.gate.outputs.publish == 'true'
+        run: npm ci
+
+      - if: steps.gate.outputs.publish == 'true'
+        run: npm run build
 
       - name: Publish to npm
+        if: steps.gate.outputs.publish == 'true'
         run: |
           ARGS="--access public --provenance"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
@@ -59,5 +100,3 @@ jobs:
             fi
           fi
           npm publish $ARGS
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
