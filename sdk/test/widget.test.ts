@@ -148,3 +148,46 @@ describe('BridleChat while reconnecting', () => {
     ])
   })
 })
+
+/*
+ * `enableImages` has to close both halves of the door. The capability list is
+ * covered in client.test.ts; what matters here is the half a user can see -
+ * and that documents still have a way in when an upload endpoint exists.
+ */
+describe('BridleChat with pictures turned off', () => {
+  it('offers the picker and advertises images by default', async () => {
+    valid.add('t')
+    mountChat({ token: 't' })
+    await settle()
+
+    expect(wrapper!.find('.bridle__attach').exists()).toBe(true)
+    expect(sockets.at(-1)!.handshakes[0].capabilities).toEqual(['streaming', 'images', 'files', 'ui'])
+  })
+
+  it('hides the picker and stops advertising images', async () => {
+    valid.add('t')
+    mountChat({ token: 't', enableImages: false })
+    await settle()
+
+    expect(wrapper!.find('.bridle__attach').exists()).toBe(false)
+    expect(sockets.at(-1)!.handshakes[0].capabilities).toEqual(['streaming', 'files', 'ui'])
+  })
+
+  it('reads the flag when it arrives as an attribute string', async () => {
+    // Through `init()` the value crosses an HTML attribute, so the widget sees
+    // "false", not false - a plain truthiness check would miss it.
+    valid.add('t')
+    mountChat({ token: 't', enableImages: 'false' })
+    await settle()
+
+    expect(wrapper!.find('.bridle__attach').exists()).toBe(false)
+  })
+
+  it('keeps the picker for documents when an upload endpoint is configured', async () => {
+    valid.add('t')
+    mountChat({ token: 't', enableImages: false, uploadUrl: 'https://files.example.com/upload' })
+    await settle()
+
+    expect(wrapper!.find('.bridle__attach').exists()).toBe(true)
+  })
+})
