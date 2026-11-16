@@ -2,7 +2,13 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick, useHost } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import { BridleClient, BridleAuthError } from './client'
+import {
+  BridleClient,
+  BridleAuthError,
+  isTokenRejection,
+  DEFAULT_CAPABILITIES,
+} from './client'
+import { TokenSource } from './token'
 import type {
   BridleMessageKind,
   BridlePart,
@@ -18,8 +24,14 @@ interface IBridleAttachment {
   name: string
   size: number
   mediaType: string
-  base64: string
-  dataUrl: string
+  /** Inline image payload. Absent on documents, which travel as a URL. */
+  base64?: string
+  /** Thumbnail source for images. Absent on documents. */
+  dataUrl?: string
+  /** Where the uploaded document lives. Absent on inline images. */
+  url?: string
+  /** True while the upload is still in flight; the chip shows it. */
+  uploading?: boolean
 }
 
 // 5 attachments fits comfortably; bigger payloads start to choke the
@@ -76,8 +88,25 @@ const props = withDefaults(
     apiUrl: string
     agentId: string
     token: string
+    /**
+     * Token PROVIDER (CLEAN-188). A JS property, not an attribute — `init({
+     * token: fn })` sets it. The widget calls it for the first token, ~60 s
+     * before each token's `exp`, and after the hub rejects one, so a visitor
+     * never sees an expired session while the provider works. When set,
+     * `token` is not needed.
+     */
+    tokenProvider?: () => string | Promise<string>
     title?: string
     placeholder?: string
+    /**
+     * `accept` for the attachment picker. Defaults to `image/*`; widening it
+     * needs `uploadUrl`, since anything that is not an image travels as a URL.
+     */
+    accept?: string
+    /** Endpoint that stores a document and answers with its URL. See types.ts. */
+    uploadUrl?: string
+    /** Pictures in the conversation, both directions. See types.ts. */
+    enableImages?: boolean | string
     mode?: 'floating' | 'inline'
     /** Open the panel by default (floating mode). Honored once on mount. */
     defaultOpen?: boolean | string
@@ -142,15 +171,26 @@ const props = withDefaults(
      * the reasoning entirely and show answers only.
      */
     thinkingLabel?: string
+    /** Banner text when the hub no longer accepts the visitor's token and renewing it failed. */
+    sessionExpiredLabel?: string
+    /** Banner button that asks for a new token and reconnects. */
+    reconnectLabel?: string
+    /** Banner button shown when the token is static and only a reload can get a new one. */
+    reloadLabel?: string
   }>(),
   {
     title: 'Agent Chat',
     placeholder: 'Type a message...',
+    accept: 'image/*',
+    enableImages: true,
     mode: 'floating',
     defaultOpen: false,
     theme: 'default',
     colorMode: 'auto',
     thinkingLabel: 'Work log',
+    sessionExpiredLabel: 'Your session has expired.',
+    reconnectLabel: 'Reconnect',
+    reloadLabel: 'Reload the page',
   },
 )
 
@@ -160,6 +200,12 @@ const emit = defineEmits<{
   error: [error: Error]
   open: []
   close: []
+  /**
+   * The hub rejected the token and the widget cannot get a new one itself (a
+   * static `token`, no provider). The host answers with `setToken()` or a new
+   * `token` attribute; the widget then reconnects keeping the conversation.
+   */
+  'token-expired': []
 }>()
 
 const messages = ref<IBridleMessage[]>([])
@@ -192,9 +238,19 @@ watch(connectionError, (err) => {
     displayedError.value = connectionError.value
   }, ERROR_SETTLE_MS)
 })
+const imagesEnabled = computed(() => coerceBoolTrue(props.enableImages))
+/**
+ * With pictures off the picker has nothing left to offer, unless the
+ * integrator pointed `uploadUrl` at somewhere documents can live.
+ */
+const showAttachments = computed(() => imagesEnabled.value || !!props.uploadUrl)
+
 const isOpen = ref(props.mode === 'inline' || coerceBool(props.defaultOpen))
 const draft = ref('')
 const attachments = ref<IBridleAttachment[]>([])
+// Why a picked file did not become an attachment. Shown next to the input:
+// a console warning is invisible to the person who just chose the file.
+const attachmentError = ref('')
 const isDraggingFile = ref(false)
 const dragCounter = ref(0)
 const scrollEl = ref<HTMLElement | null>(null)
@@ -217,6 +273,15 @@ interface IUiFormState {
 const uiState = ref<Record<string, IUiFormState>>({})
 
 let client: BridleClient | null = null
+// One token source for the element's lifetime, so the cached token and its
+// renewal timer survive the reconnects of "New chat" and `setToken()`.
+const tokens = new TokenSource(props.token || undefined, props.tokenProvider)
+// Reactive mirror of `tokens.renewable` for the template and the error path.
+const canRenewToken = ref(tokens.renewable)
+// Messages the visitor sent while the socket was down (reconnecting after a
+// network drop or a token renewal). Shown at once, sent after the next
+// `welcome`, so nothing typed during a reconnect is lost.
+const outbox: { text: string; parts: BridlePart[] }[] = []
 // Bumped on every connect() so welcome / transcript callbacks from a stale
 // socket can detect they're outdated and bail. Without this, "New chat"
 // would race: the old socket's welcome event arrives just after we clear
@@ -239,6 +304,15 @@ let htmlObserver: MutationObserver | null = null
 
 function coerceBool(v: boolean | string): boolean {
   return v === true || v === 'true' || v === ''
+}
+
+/**
+ * The default-true counterpart of `coerceBool`. An absent attribute has to
+ * mean "on" here, so only an explicit false turns the flag off - and it
+ * arrives as the string "false" when it comes through an HTML attribute.
+ */
+function coerceBoolTrue(v: boolean | string | undefined): boolean {
+  return !(v === false || v === 'false')
 }
 
 function detectHostColorScheme(): 'light' | 'dark' {
@@ -408,8 +482,14 @@ function buildClient(): BridleClient {
   return new BridleClient({
     apiUrl: props.apiUrl,
     agentId: props.agentId,
-    token: props.token,
+    getToken: (options) => tokens.get(options),
+    canRefreshToken: canRenewToken.value,
     prompt: props.prompt,
+    // Telling the agent we cannot render pictures is what stops them coming
+    // back; hiding the picker alone would only block the visitor's side.
+    capabilities: imagesEnabled.value
+      ? undefined
+      : DEFAULT_CAPABILITIES.filter((c) => c !== 'images'),
   })
 }
 
@@ -421,7 +501,8 @@ async function connect(): Promise<void> {
   // in particular would otherwise resurrect the old transcript right
   // after "New chat" clears it.
   const gen = ++connectGen
-  client = buildClient()
+  const owner = buildClient()
+  client = owner
   client.on('open', () => {
     if (gen !== connectGen) return
     isConnected.value = true
@@ -436,9 +517,13 @@ async function connect(): Promise<void> {
     if (gen !== connectGen) return
     connectionError.value = err
     emit('error', err)
+    // Renewal is the client's job when there is a provider; a rejection that
+    // still reaches here with a static token is the host's cue to push one.
+    if (isSessionExpired(err) && !canRenewToken.value) emit('token-expired')
   })
   client.on('welcome', ({ clientId }) => {
     if (gen !== connectGen) return
+    flushOutbox(owner)
     // Hub assigns clientId from JWT sub (or 'admin' for admin tokens) and
     // the runtime persists the transcript at `bridle:<clientId>.jsonl`.
     // Replay it so the chat survives a page refresh — live messages keep
@@ -449,7 +534,7 @@ async function connect(): Promise<void> {
       skipNextTranscript = false
       return
     }
-    void loadTranscript(clientId, gen)
+    void loadTranscript(owner, clientId, gen)
   })
   client.on('typing', () => {
     if (gen !== connectGen) return
@@ -488,16 +573,57 @@ async function connect(): Promise<void> {
   await client.connect()
 }
 
-async function loadTranscript(channel: string, gen: number): Promise<void> {
+function isSessionExpired(err: unknown): boolean {
+  return err instanceof BridleAuthError && isTokenRejection(err.code)
+}
+
+/**
+ * Banner action for an expired session. With a provider: force a new token and
+ * reconnect. With a static token: ask the host again via `token-expired` — its
+ * `setToken()` reconnects through the token watcher.
+ */
+async function reconnectSession(): Promise<void> {
+  if (!canRenewToken.value) {
+    emit('token-expired')
+    return
+  }
+  try {
+    await tokens.get({ force: true })
+  } catch (err) {
+    connectionError.value = err instanceof Error ? err : new Error(String(err))
+    return
+  }
+  connectionError.value = null
+  await connect()
+}
+
+/** A new credential for the same visitor: reconnect, keep the conversation on screen. */
+function applyToken(token: string): void {
+  tokens.set(token)
+  connectionError.value = null
+  if (props.apiUrl && props.agentId) void connect()
+}
+
+function reloadPage(): void {
+  if (typeof window !== 'undefined') window.location.reload()
+}
+
+function flushOutbox(owner: BridleClient): void {
+  if (outbox.length > 0) isTyping.value = true
+  while (outbox.length > 0) {
+    const next = outbox.shift()!
+    owner.send(next.text, next.parts)
+  }
+}
+
+async function loadTranscript(owner: BridleClient, channel: string, gen: number): Promise<void> {
   if (!channel) return
   try {
     const url =
       `${props.apiUrl.replace(/\/$/, '')}` +
       `/api/agent/${encodeURIComponent(props.agentId)}/transcript` +
       `?channel=${encodeURIComponent(channel)}`
-    const headers: Record<string, string> = {}
-    if (props.token) headers.Authorization = `Bearer ${props.token}`
-    const res = await fetch(url, { headers })
+    const res = await owner.authorizedFetch(url)
     if (!res.ok) return
     // Bail if a newer connect() has started while this fetch was in
     // flight — the channel is stale and merging would re-populate a
@@ -539,15 +665,23 @@ async function loadTranscript(channel: string, gen: number): Promise<void> {
 function send(): void {
   const text = draft.value.trim()
   if (!client) return
-  if (!text && attachments.value.length === 0) return
+  // An attachment whose upload has not landed has no URL yet, so it would go
+  // out as a broken part. It stays in the tray and rides the next send.
+  const ready = attachments.value.filter((a) => !a.uploading)
+  if (!text && ready.length === 0) return
 
-  // Image parts come first so the agent sees the image before the caption
+  // Attachment parts come first so the agent sees them before the caption
   // — matches how every chat client orders attached media + accompanying text.
-  const parts: BridlePart[] = attachments.value.map((a) => ({
-    type: 'image' as const,
-    base64: a.base64,
-    mediaType: a.mediaType,
-  }))
+  const parts: BridlePart[] = ready.map((a) =>
+    a.base64 !== undefined
+      ? { type: 'image' as const, base64: a.base64, mediaType: a.mediaType }
+      : {
+          type: 'file' as const,
+          url: a.url as string,
+          name: a.name,
+          mimeType: a.mediaType,
+        },
+  )
   if (text) parts.push({ type: 'text', text })
 
   upsert({
@@ -560,10 +694,15 @@ function send(): void {
   // The previous turn is over the moment the visitor speaks again, whatever
   // the runtime did or failed to do with it.
   settleLog()
-  isTyping.value = true
-  client.send(text, parts)
+  if (isConnected.value) {
+    isTyping.value = true
+    client.send(text, parts)
+  } else {
+    outbox.push({ text, parts })
+  }
   draft.value = ''
-  attachments.value = []
+  attachments.value = attachments.value.filter((a) => a.uploading)
+  attachmentError.value = ''
   // autoSize() set an inline height on growth; clearing the value alone
   // leaves the textarea tall and empty. Drop the inline style so it falls
   // back to the rows="1" baseline.
@@ -626,29 +765,111 @@ async function fileToImagePart(
   }
 }
 
+/**
+ * Store a document and hand back the URL the agent will fetch it from.
+ *
+ * The protocol carries documents as a URL, not as bytes, and the hub does not
+ * host them — so this posts to whatever `uploadUrl` names. Both a bare body
+ * and one wrapped in `data` are accepted, because envelope-style APIs are
+ * common and the difference is not worth an extra option.
+ */
+async function uploadDocument(
+  file: File,
+): Promise<{ url: string; name: string; mimeType: string }> {
+  const body = new FormData()
+  body.append('file', file)
+  const headers: Record<string, string> = {}
+  if (props.token) headers.Authorization = `Bearer ${props.token}`
+
+  const res = await fetch(props.uploadUrl as string, { method: 'POST', body, headers })
+  if (!res.ok) throw new Error(`upload responded ${res.status}`)
+
+  const payload = (await res.json()) as Record<string, unknown>
+  const data = (payload.data ?? payload) as Record<string, unknown>
+  const url = typeof data.url === 'string' ? data.url : ''
+  if (!url) throw new Error('upload response carried no `url`')
+
+  return {
+    url,
+    name: typeof data.name === 'string' ? data.name : file.name,
+    mimeType:
+      typeof data.mimeType === 'string'
+        ? data.mimeType
+        : file.type || 'application/octet-stream',
+  }
+}
+
 async function addFiles(files: FileList | File[]): Promise<void> {
+  // The picker is hidden when attachments are off, but paste and drop reach
+  // this function directly - so the gate belongs here, not on the button.
+  if (!showAttachments.value) return
+  attachmentError.value = ''
+
   for (const file of Array.from(files)) {
-    if (attachments.value.length >= MAX_ATTACHMENTS) break
-    if (!file.type.startsWith('image/')) {
-      console.warn(`[bridle] skipping non-image attachment: ${file.name} (${file.type})`)
-      continue
+    if (attachments.value.length >= MAX_ATTACHMENTS) {
+      attachmentError.value = `Up to ${MAX_ATTACHMENTS} attachments per message.`
+      break
     }
     if (file.size > MAX_FILE_SIZE) {
-      console.warn(`[bridle] attachment too large: ${file.name} (${file.size} bytes)`)
+      attachmentError.value = `"${file.name}" is over the ${Math.round(MAX_FILE_SIZE / 1024 / 1024)} MB limit.`
       continue
     }
+
+    // Images ride along inside the message; everything else has to be hosted
+    // first, because a `file` part is a URL.
+    if (file.type.startsWith('image/')) {
+      try {
+        const { base64, mediaType } = await fileToImagePart(file)
+        attachments.value.push({
+          id: randomId(),
+          name: file.name,
+          size: file.size,
+          mediaType,
+          base64,
+          dataUrl: `data:${mediaType};base64,${base64}`,
+        })
+      } catch (err) {
+        console.warn(`[bridle] failed to read attachment ${file.name}:`, err)
+        attachmentError.value = `"${file.name}" could not be read.`
+      }
+      continue
+    }
+
+    if (!props.uploadUrl) {
+      attachmentError.value = `"${file.name}" can't be attached — this chat accepts images only.`
+      continue
+    }
+
+    // The chip appears immediately so the wait is visible; `send` skips any
+    // attachment still uploading, so an early Enter cannot ship a half-done one.
+    const pending: IBridleAttachment = {
+      id: randomId(),
+      name: file.name,
+      size: file.size,
+      mediaType: file.type || 'application/octet-stream',
+      uploading: true,
+    }
+    attachments.value.push(pending)
+
     try {
-      const { base64, mediaType } = await fileToImagePart(file)
-      attachments.value.push({
-        id: randomId(),
-        name: file.name,
-        size: file.size,
-        mediaType,
-        base64,
-        dataUrl: `data:${mediaType};base64,${base64}`,
-      })
+      const stored = await uploadDocument(file)
+      // Replace by index rather than mutating `pending`: the array is reactive,
+      // and writing to the object we pushed would bypass the proxy that the
+      // chip's render effect tracks — the spinner would never clear.
+      const idx = attachments.value.findIndex((a) => a.id === pending.id)
+      if (idx !== -1) {
+        attachments.value[idx] = {
+          ...attachments.value[idx],
+          url: stored.url,
+          name: stored.name,
+          mediaType: stored.mimeType,
+          uploading: false,
+        }
+      }
     } catch (err) {
-      console.warn(`[bridle] failed to read attachment ${file.name}:`, err)
+      console.warn(`[bridle] failed to upload attachment ${file.name}:`, err)
+      attachments.value = attachments.value.filter((a) => a.id !== pending.id)
+      attachmentError.value = `"${file.name}" could not be uploaded.`
     }
   }
 }
@@ -674,6 +895,7 @@ function openFilePicker(): void {
 // Drag overlay lives at the panel level. Counter avoids the classic
 // flicker where `dragleave` fires for every child element you pass over.
 function dragHasFiles(e: DragEvent): boolean {
+  if (!showAttachments.value) return false
   return !!e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files')
 }
 
@@ -726,6 +948,17 @@ function imageParts(m: IBridleMessage): Array<{ base64: string; mediaType: strin
   return m.parts
     .filter((p): p is { type: 'image'; base64: string; mediaType: string } => p.type === 'image')
     .map((p) => ({ base64: p.base64, mediaType: p.mediaType }))
+}
+
+function fileParts(
+  m: IBridleMessage,
+): Array<{ url: string; name: string; mimeType?: string }> {
+  return m.parts
+    .filter(
+      (p): p is { type: 'file'; url: string; name: string; mimeType?: string } =>
+        p.type === 'file',
+    )
+    .map((p) => ({ url: p.url, name: p.name, mimeType: p.mimeType }))
 }
 
 function uiParts(m: IBridleMessage): IBridleUiPart[] {
@@ -954,17 +1187,13 @@ async function startNewChat(): Promise<void> {
   // fall back to delete(); Ranch's controller moves the live JSONL to a
   // timestamped sibling so admins still have the conversation.
   const channel = client?.getClientId?.()
-  if (channel && props.apiUrl && props.agentId) {
+  if (client && channel && props.apiUrl && props.agentId) {
     try {
       const url =
         `${props.apiUrl.replace(/\/$/, '')}` +
         `/api/agent/${encodeURIComponent(props.agentId)}/transcript/archive` +
         `?channel=${encodeURIComponent(channel)}`
-      const headers: Record<string, string> = {}
-      if (typeof props.token === 'string' && props.token) {
-        headers.Authorization = `Bearer ${props.token}`
-      }
-      await fetch(url, { method: 'POST', headers })
+      await client.authorizedFetch(url, { method: 'POST' })
     } catch (err) {
       console.warn('[bridle] transcript archive failed (continuing):', err)
     }
@@ -1037,16 +1266,33 @@ watch(
   { deep: true },
 )
 
-// Reconnect when bot/token/api/prompt changes — useful for dynamic dashboards.
-// Token may be empty for public bots (auth via Origin whitelist).
+// Reconnect when bot/api/prompt changes — useful for dynamic dashboards.
+// A different agent is a different conversation, so the screen is cleared.
 watch(
-  () => [props.apiUrl, props.agentId, props.token, props.prompt],
+  () => [props.apiUrl, props.agentId, props.prompt],
   () => {
     if (!props.apiUrl || !props.agentId) return
     messages.value = []
     cancelGreetingTimer()
     greetingShown.value = false
     void connect()
+  },
+)
+
+// A new token (`setToken()` / the `token` attribute) is the same visitor with
+// a fresh credential: reconnect, keep the conversation on screen; the welcome
+// replay merges the transcript back in. Token may be empty for public bots.
+watch(
+  () => props.token,
+  (token) => applyToken(token ?? ''),
+)
+
+watch(
+  () => props.tokenProvider,
+  (provider) => {
+    tokens.setProvider(provider)
+    canRenewToken.value = tokens.renewable
+    if (provider && !isConnected.value && props.apiUrl && props.agentId) void connect()
   },
 )
 
@@ -1093,6 +1339,7 @@ onBeforeUnmount(() => {
   }
   client?.disconnect()
   client = null
+  tokens.dispose()
 })
 
 defineExpose({
@@ -1106,6 +1353,7 @@ defineExpose({
     draft.value = text
     send()
   },
+  setToken: applyToken,
 })
 </script>
 
@@ -1230,11 +1478,27 @@ defineExpose({
         <template v-else-if="(displayedError as BridleAuthError).code === 'MISSING_TOKEN'">
           Authentication required — provide a JWT via <code>data-token</code>.
         </template>
-        <template v-else-if="(displayedError as BridleAuthError).code === 'INVALID_TOKEN'">
-          The provided token is invalid or expired.
+        <template v-else-if="isSessionExpired(displayedError)">
+          {{ sessionExpiredLabel }}
+          <span class="bridle__banner-actions">
+            <button type="button" class="bridle__banner-action" @click="reconnectSession">
+              {{ reconnectLabel }}
+            </button>
+            <button
+              v-if="!canRenewToken"
+              type="button"
+              class="bridle__banner-action"
+              @click="reloadPage"
+            >
+              {{ reloadLabel }}
+            </button>
+          </span>
         </template>
         <template v-else-if="(displayedError as BridleAuthError).code === 'MISSING_AGENT_ID'">
           Missing <code>agent-id</code> on the embed script.
+        </template>
+        <template v-else-if="displayedError instanceof BridleAuthError">
+          Connection error
         </template>
         <template v-else>
           {{ displayedError.message || 'Connection error' }}
@@ -1388,6 +1652,14 @@ defineExpose({
                 loading="lazy"
               />
             </div>
+            <a
+              v-for="(p, i) in fileParts(m)"
+              :key="`file-${i}`"
+              class="bridle__msg-file"
+              :href="p.url"
+              target="_blank"
+              rel="noopener noreferrer"
+            >{{ p.name }}</a>
             <div v-if="m.text" v-html="renderMarkdown(m.text)" />
             <form
               v-for="(p, ui) in uiParts(m)"
@@ -1540,6 +1812,14 @@ defineExpose({
                 loading="lazy"
               />
             </div>
+            <a
+              v-for="(p, i) in fileParts(m)"
+              :key="`file-${i}`"
+              class="bridle__msg-file"
+              :href="p.url"
+              target="_blank"
+              rel="noopener noreferrer"
+            >{{ p.name }}</a>
             <div
               v-for="(p, i) in uiSubmitParts(m)"
               :key="`sub-${i}`"
@@ -1564,13 +1844,26 @@ defineExpose({
         <div class="bridle__drop-hint">Drop image to attach</div>
       </div>
 
+      <div v-if="attachmentError" class="bridle__attach-error" role="alert">
+        {{ attachmentError }}
+      </div>
+
       <div v-if="attachments.length" class="bridle__attachments">
         <div
           v-for="a in attachments"
           :key="a.id"
           class="bridle__attachment"
+          :class="{ 'bridle__attachment--file': !a.dataUrl }"
         >
-          <img :src="a.dataUrl" :alt="a.name" class="bridle__attachment-img" />
+          <img
+            v-if="a.dataUrl"
+            :src="a.dataUrl"
+            :alt="a.name"
+            class="bridle__attachment-img"
+          />
+          <span v-else class="bridle__attachment-name" :title="a.name">
+            {{ a.uploading ? 'Uploading…' : a.name }}
+          </span>
           <button
             type="button"
             class="bridle__attachment-remove"
@@ -1582,17 +1875,19 @@ defineExpose({
 
       <form class="bridle__input" @submit.prevent="send">
         <input
+          v-if="showAttachments"
           ref="fileInputEl"
           type="file"
-          accept="image/*"
+          :accept="accept"
           multiple
           class="bridle__file-input"
           @change="onFileChange"
         />
         <button
+          v-if="showAttachments"
           type="button"
           class="bridle__attach"
-          aria-label="Attach image"
+          aria-label="Attach file"
           :disabled="!isConnected || attachments.length >= MAX_ATTACHMENTS"
           @click="openFilePicker"
         >
@@ -1611,7 +1906,6 @@ defineExpose({
           ref="inputEl"
           v-model="draft"
           :placeholder="placeholder"
-          :disabled="!isConnected"
           rows="1"
           @input="autoSize"
           @keydown="onKeydown"
@@ -1619,7 +1913,7 @@ defineExpose({
         />
         <button
           type="submit"
-          :disabled="!isConnected || (!draft.trim() && attachments.length === 0)"
+          :disabled="!draft.trim() && attachments.length === 0"
         >
           <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
             <path
@@ -1929,6 +2223,20 @@ defineExpose({
   background: var(--bridle-error-bg);
   color: var(--bridle-error-fg);
   border-bottom-color: var(--bridle-error-border);
+}
+.bridle__banner-actions {
+  display: inline-flex;
+  gap: 8px;
+  margin-left: 8px;
+}
+.bridle__banner-action {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  padding: 1px 8px;
+  cursor: pointer;
 }
 .bridle__banner code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
@@ -2382,6 +2690,48 @@ defineExpose({
   overflow: hidden;
   border: 1px solid var(--bridle-border);
   background: var(--bridle-bg);
+}
+
+/* A document has no thumbnail, so the chip grows into a name plate instead
+   of leaving a 56px square blank. */
+.bridle__attachment--file {
+  width: auto;
+  max-width: 180px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  padding: 0 24px 0 10px;
+  background: var(--bridle-bg-elv);
+}
+
+.bridle__attachment-name {
+  font-size: 12px;
+  line-height: 1.3;
+  color: var(--bridle-fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bridle__attach-error {
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--bridle-danger, #b91c1c);
+  background: var(--bridle-bg-elv);
+  border-top: 1px solid var(--bridle-border);
+  flex-shrink: 0;
+}
+
+/* A file part arrives as a URL, so it renders as a plain download link —
+   there is nothing to preview without fetching the bytes. */
+.bridle__msg-file {
+  display: inline-block;
+  margin: 4px 0;
+  font-size: 13px;
+  color: var(--bridle-primary);
+  text-decoration: underline;
+  word-break: break-word;
 }
 
 .bridle__attachment-img {

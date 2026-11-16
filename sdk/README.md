@@ -20,12 +20,15 @@ The script auto-mounts a floating chat bubble in the bottom-right corner. If the
 | Attribute | Default | Description |
 |-----------|---------|-------------|
 | `data-agent-id` | required | Agent identifier registered on the hub |
-| `data-token` | optional | JWT for browser auth (omit for public agents) |
+| `data-token` | optional | JWT for browser auth (omit for public agents). Static — see [Token refresh](#token-refresh) |
 | `data-api-url` | inferred | Hub origin |
 | `data-mode` | `floating` | `floating` (FAB) or `inline` (mounted inside `data-mount`) |
 | `data-mount` | `<body>` | CSS selector for inline mode |
 | `data-title` | `Agent Chat` | Header text |
 | `data-placeholder` | `Type a message...` | Input placeholder |
+| `data-accept` | `image/*` | File types the attachment picker offers |
+| `data-upload-url` | optional | Endpoint that stores a non-image attachment and answers with its URL |
+| `data-enable-images` | `true` | Pictures in the conversation, both directions. `false` turns them off |
 | `data-custom-css` | optional | Inline CSS injected into the shadow root |
 | `data-stylesheet` | optional | Stylesheet URL(s) loaded into the shadow root (comma-separate for multiple) |
 
@@ -37,7 +40,7 @@ import { init } from '@cleanslice/bridle'
 const chat = init({
   apiUrl: 'https://your-hub.example.com',
   agentId: 'agent-abc-123',
-  token: () => fetchJwt(),     // string OR async function for refresh
+  token: () => fetchJwt(),     // token provider (recommended) or a static string
   mount: '#chat',              // CSS selector or HTMLElement
   mode: 'inline',
   title: 'Support',
@@ -50,8 +53,35 @@ const chat = init({
 chat.sendMessage('Hi!')
 chat.open()
 chat.close()
+chat.setToken(jwt)             // replace a static token; reconnects, keeps the chat
 chat.destroy()
 ```
+
+## Token refresh
+
+Embed tokens are short-lived on purpose (`POST /auth/embed/token` defaults to
+`15m`); the long-lived credential is your server-side API key. Pass a **token
+provider** and the widget keeps itself signed in:
+
+```js
+init({
+  apiUrl,
+  agentId,
+  token: () => fetch('/my-backend/bridle-token').then((r) => r.json()).then((j) => j.token),
+})
+```
+
+The provider is called for the first token, ~60 s before each token's `exp`,
+and after the hub rejects a token (`TOKEN_EXPIRED` / `INVALID_TOKEN`, HTTP
+`401`) — then the widget reconnects or retries once, keeping the conversation.
+If that fails too, the visitor sees "Your session has expired" with a
+**Reconnect** button instead of a raw error code.
+
+With a static string token the widget cannot renew: it fires `onTokenExpired`
+(`token-expired` on the element), and `chat.setToken(newJwt)` reconnects.
+Don't work around expiry with a long `expiresIn` — a long-lived browser JWT
+still expires, and leaks for longer. Full guide:
+[bridle.cleanslice.org/embed/npm#token-refresh](https://bridle.cleanslice.org/embed/npm#token-refresh).
 
 ## Work log (agent reasoning)
 
@@ -119,6 +149,47 @@ bridle-chat {
 The element uses Shadow DOM, so host page styles never bleed in and component styles never bleed out.
 
 ### Restyling internal elements
+
+## Attachments
+
+Images ride inside the message as base64 and need no configuration.
+
+Anything else is carried by the protocol as `{ type: 'file', url, name, mimeType }`
+— a URL, not bytes — and the hub does not host files. So a document attachment
+needs two things: a picker that offers the type, and somewhere to put it.
+
+```js
+init({
+  agentId: 'bot-abc-123',
+  accept: 'image/*,application/pdf,.docx,.xlsx',
+  uploadUrl: 'https://your-api.example.com/api/agent/bot-abc-123/attachment',
+});
+```
+
+`uploadUrl` receives `POST` as `multipart/form-data` with the file in a `file`
+field, and answers `{ url, name?, mimeType? }` — or the same object under a
+`data` key. The `token` given to `init` is forwarded as `Authorization`.
+
+Widen `accept` without `uploadUrl` and the widget says so next to the input
+rather than dropping the file quietly. Limits stay as they were: 5 attachments per message, 10 MB each.
+
+### Turning pictures off
+
+```js
+init({
+  agentId: 'bot-abc-123',
+  enableImages: false,
+});
+```
+
+This closes both directions. The picker disappears, and pasted or dropped
+images are refused rather than silently ignored — and the handshake stops
+advertising `images`, which is what tells the agent not to answer with one.
+Hiding the picker alone would only cover the visitor's side.
+
+Documents are unaffected: with `uploadUrl` configured the picker stays for
+them, so `enableImages: false` plus an upload endpoint gives a
+documents-only widget.
 
 `themeVars` covers the design tokens (colors, radius, shadow, etc.). To override the actual class rules (`.bridle__panel`, `.bridle__bubble`, ...), inject your own CSS into the shadow root via `customCss` or `stylesheets`:
 
