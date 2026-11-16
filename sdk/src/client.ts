@@ -1,5 +1,9 @@
 import { io, type Socket } from 'socket.io-client'
-import type { BridlePart, IBridleMessage } from './types'
+import { TokenSource, type IGetTokenOptions, type TokenProvider } from './token'
+import type { BridleMessageKind, BridlePart, IBridleMessage } from './types'
+
+/** Everything the embed widget knows how to render. */
+export const DEFAULT_CAPABILITIES = ['streaming', 'images', 'files', 'ui']
 
 export interface IBridleClientOptions {
   apiUrl: string
@@ -7,8 +11,26 @@ export interface IBridleClientOptions {
   /**
    * JWT for authenticated bots. Omit when the bot is public on the hub —
    * the connection is then authorized by the request `Origin` header.
+   *
+   * A function is a token PROVIDER: it is called for the first token, again
+   * ~60 s before each token's `exp`, and whenever the hub turns the current
+   * token away. A static string cannot be renewed — once it expires the
+   * client reports `TOKEN_EXPIRED` and stays rejected.
    */
-  token?: string | (() => string | Promise<string>)
+  token?: string | TokenProvider
+  /**
+   * Where the token comes from on every handshake and HTTP call; takes
+   * precedence over `token`. `force: true` must bypass any cache — the hub has
+   * just rejected the current token. The embed widget passes its own
+   * `TokenSource` here so the cached token outlives a reconnect.
+   */
+  getToken?: (options?: IGetTokenOptions) => Promise<string>
+  /**
+   * Whether `getToken({ force: true })` can return a different token, i.e. a
+   * rejection is worth one renewal and retry. Defaults to `true` with
+   * `getToken`, and to "token is a function" otherwise.
+   */
+  canRefreshToken?: boolean
   /** Optional channel for transcript scoping (default: 'web'). */
   channel?: string
   /**
@@ -18,10 +40,24 @@ export interface IBridleClientOptions {
    * metadata. Static for the lifetime of the connection.
    */
   prompt?: string
+  /**
+   * What this client can render, sent at handshake and forwarded to the agent
+   * on every message. Defaults to everything the widget supports; narrow it to
+   * keep a part type away from this peer - dropping `'images'` is how an
+   * integrator turns picture replies off.
+   */
+  capabilities?: string[]
 }
 
 type EventName = 'open' | 'close' | 'error' | 'typing' | 'message' | 'stream' | 'stream_end' | 'welcome'
 type Listener<T = unknown> = (payload: T) => void
+
+/**
+ * At most one forced renewal per this window. A token renewed a moment ago
+ * and rejected again is not going to work on a third try (wrong signing
+ * secret, revoked visitor): report it instead of looping on the provider.
+ */
+const FORCED_REFRESH_INTERVAL_MS = 30_000
 
 /**
  * Structured connection rejection from the hub. Lets embed UIs distinguish
@@ -32,7 +68,13 @@ type Listener<T = unknown> = (payload: T) => void
  *   - `MISSING_AGENT_ID`    — embed didn't pass `agentId`
  *   - `ORIGIN_NOT_ALLOWED`  — agent is public but this origin isn't whitelisted
  *   - `MISSING_TOKEN`       — agent is private and no JWT was provided
- *   - `INVALID_TOKEN`       — JWT failed verification
+ *   - `TOKEN_EXPIRED`       — JWT verified but is past its `exp`
+ *   - `INVALID_TOKEN`       — JWT failed verification (bad signature, wrong secret)
+ *
+ * HTTP endpoints answer 401 with `TOKEN_EXPIRED` / `TOKEN_INVALID` in the body
+ * instead. The client treats `TOKEN_EXPIRED` and `INVALID_TOKEN` (and any 401)
+ * the same way — renew once and retry — so they reach listeners only when the
+ * token cannot be renewed, or a freshly renewed one was turned away as well.
  */
 export class BridleAuthError extends Error {
   readonly code: string
@@ -51,7 +93,7 @@ export class BridleAuthError extends Error {
  * behavior (connect / send / stream) without the embedded UI.
  *
  * @example
- *   const client = new BridleClient({ apiUrl, agentId, token })
+ *   const client = new BridleClient({ apiUrl, agentId, token: () => fetchJwt() })
  *   client.on('message', (m) => console.log(m.text))
  *   await client.connect()
  *   client.send('hello')
@@ -60,15 +102,61 @@ export class BridleClient {
   private socket: Socket | null = null
   private listeners = new Map<EventName, Set<Listener<any>>>()
   private clientId: string | null = null
+  private readonly tokens: (options?: IGetTokenOptions) => Promise<string>
+  private readonly renewable: boolean
+  /** Built from `token` when no `getToken` was given; owned, so disposed here. */
+  private readonly ownTokenSource: TokenSource | null = null
+  private lastForcedRefreshAt = Number.NEGATIVE_INFINITY
+  /** Renewal to reconnect with once the hub has dropped the rejected socket. */
+  private pendingReconnect: Promise<string> | null = null
 
-  constructor(private opts: IBridleClientOptions) {}
+  constructor(private opts: IBridleClientOptions) {
+    if (opts.getToken) {
+      this.tokens = opts.getToken
+      this.renewable = opts.canRefreshToken ?? true
+    } else {
+      const source =
+        typeof opts.token === 'function'
+          ? new TokenSource(undefined, opts.token)
+          : new TokenSource(opts.token ?? '')
+      this.ownTokenSource = source
+      this.tokens = (o) => source.get(o)
+      this.renewable = opts.canRefreshToken ?? source.renewable
+    }
+  }
+
+  /** The token the next handshake or request will carry (cached until near `exp`). */
+  getToken(options?: IGetTokenOptions): Promise<string> {
+    return this.tokens(options)
+  }
+
+  /** Whether an expired or rejected token can be replaced without the host page. */
+  canRefreshToken(): boolean {
+    return this.renewable
+  }
+
+  /**
+   * `fetch` against the hub with the current token as a bearer. A 401 renews
+   * the token and retries once, so HTTP calls (transcript, archive) keep
+   * working after the token the page started with has expired.
+   */
+  async authorizedFetch(url: string, init: RequestInit = {}): Promise<Response> {
+    const send = (token: string): Promise<Response> => {
+      const headers = new Headers(init.headers)
+      if (token) headers.set('Authorization', `Bearer ${token}`)
+      return fetch(url, { ...init, headers })
+    }
+    const used = await this.tokens()
+    const res = await send(used)
+    if (res.status !== 401 || !this.renewable) return res
+    // Another caller may have renewed while this request was in flight; only
+    // force the provider when the rejected token is still the current one.
+    const current = await this.tokens()
+    return send(current !== used ? current : await this.tokens({ force: true }))
+  }
 
   async connect(): Promise<void> {
     if (this.socket) return
-    const token =
-      typeof this.opts.token === 'function'
-        ? await this.opts.token()
-        : (this.opts.token ?? '')
     const url = this.opts.apiUrl.replace(/\/$/, '')
 
     const prompt = this.opts.prompt?.trim()
@@ -81,30 +169,79 @@ export class BridleClient {
     // What this client can render. The hub forwards the list to the agent
     // on every message — runtimes use it to skip part types this peer
     // can't display (e.g. don't emit `ui` parts to a Telegram client).
-    const capabilities = ['streaming', 'images', 'files', 'ui']
+    const capabilities = this.opts.capabilities ?? DEFAULT_CAPABILITIES
+    const handshake = {
+      agentId: this.opts.agentId,
+      capabilities,
+      ...(anonId ? { anonId } : {}),
+      ...(prompt ? { prompt } : {}),
+    }
     const socket = io(`${url}/ws/client`, {
       transports: ['websocket'],
       reconnection: true,
       reconnectionDelay: 2000,
-      auth: {
-        token,
-        agentId: this.opts.agentId,
-        capabilities,
-        ...(anonId ? { anonId } : {}),
-        ...(prompt ? { prompt } : {}),
+      // A callback, not an object: socket.io calls it on every (re)connect, so
+      // each handshake asks for the current token instead of re-sending the
+      // one the page started with.
+      auth: (cb) => {
+        this.tokens().then(
+          (token) => cb({ ...handshake, token }),
+          (err: unknown) => {
+            // The provider failed: connect without a token, which the hub
+            // answers with MISSING_TOKEN, and tell the host why.
+            this.fire('error', toError(err))
+            cb({ ...handshake, token: '' })
+          },
+        )
       },
     })
 
     socket.on('connect', () => this.fire('open', undefined))
-    socket.on('disconnect', () => this.fire('close', undefined))
+    socket.on('disconnect', (reason: string) => {
+      this.fire('close', undefined)
+      // The hub rejects a token by emitting `bridle_error` and then dropping
+      // the socket itself, and socket.io never auto-reconnects after a
+      // server-side disconnect — so the renewed token needs a manual connect.
+      const renewal = this.pendingReconnect
+      this.pendingReconnect = null
+      if (!renewal || reason !== 'io server disconnect') return
+      renewal.then(
+        () => {
+          if (this.socket === socket) socket.connect()
+        },
+        (err: unknown) => this.fire('error', toError(err)),
+      )
+    })
     socket.on('connect_error', (err: Error) => this.fire('error', err))
     socket.on(
       'bridle_error',
       (data: { code: string } & Record<string, unknown>) => {
         const { code, ...rest } = data ?? { code: 'UNKNOWN' }
+        if (isTokenRejection(code)) {
+          const renewal = this.forceRefresh()
+          if (renewal) {
+            this.pendingReconnect = renewal
+            return
+          }
+        }
         this.fire('error', new BridleAuthError(code ?? 'UNKNOWN', rest))
       },
     )
+    // Non-fatal: the hub let the socket in (a public agent degrades a dead
+    // token to an anonymous session) but says the token is no good. Renew and
+    // reconnect, so the visitor keeps their identity and transcript instead
+    // of continuing as a new anonymous visitor.
+    socket.on('bridle_warning', (data: { code?: string } | undefined) => {
+      if (!isTokenRejection(data?.code)) return
+      this.forceRefresh()?.then(
+        () => {
+          if (this.socket !== socket) return
+          socket.disconnect()
+          socket.connect()
+        },
+        () => undefined,
+      )
+    })
     socket.on('welcome', (data: { clientId: string }) => {
       this.clientId = data.clientId
       this.fire('welcome', data)
@@ -131,8 +268,10 @@ export class BridleClient {
   }
 
   disconnect(): void {
+    this.pendingReconnect = null
     this.socket?.disconnect()
     this.socket = null
+    this.ownTokenSource?.dispose()
   }
 
   on(event: 'open' | 'close' | 'typing', handler: () => void): void
@@ -154,6 +293,22 @@ export class BridleClient {
     return this.clientId
   }
 
+  /**
+   * Ask the provider for a new token after a rejection, or `null` when that is
+   * not possible: a static token, or a forced renewal less than 30 s ago.
+   */
+  private forceRefresh(): Promise<string> | null {
+    if (!this.renewable) return null
+    const now = Date.now()
+    if (now - this.lastForcedRefreshAt < FORCED_REFRESH_INTERVAL_MS) return null
+    this.lastForcedRefreshAt = now
+    const renewal = this.tokens({ force: true })
+    // Callers report a failed renewal; this only keeps it from surfacing as an
+    // unhandled rejection in the meantime.
+    renewal.catch(() => undefined)
+    return renewal
+  }
+
   private fire<T>(event: EventName, payload: T): void {
     this.listeners.get(event)?.forEach((fn) => {
       try {
@@ -163,6 +318,15 @@ export class BridleClient {
       }
     })
   }
+}
+
+/** Hub codes for a token it no longer accepts — a fresh one may still get in. */
+export function isTokenRejection(code: string | undefined): boolean {
+  return code === 'TOKEN_EXPIRED' || code === 'INVALID_TOKEN'
+}
+
+function toError(err: unknown): Error {
+  return err instanceof Error ? err : new Error(String(err))
 }
 
 function toMessage(
@@ -175,6 +339,12 @@ function toMessage(
   const parts =
     (d.parts as BridlePart[]) ??
     (text ? [{ type: 'text' as const, text }] : [])
+  // `kind` marks a frame as a NOTE — the agent's reasoning rather than its
+  // answer (docs/PROTOCOL.md § Notes). Unknown values are dropped rather than
+  // passed through: the widget switches rendering on this field, and a typo on
+  // the runtime side should degrade to a normal bubble, not to a broken one.
+  const kind = d.kind === 'thinking' || d.kind === 'tool' ? (d.kind as BridleMessageKind) : undefined
+
   return {
     id: (d.messageId as string) ?? randomId(),
     role,
@@ -182,6 +352,7 @@ function toMessage(
     parts,
     ts: (d.ts as number) ?? Date.now(),
     ...(streaming !== undefined ? { streaming } : {}),
+    ...(kind ? { kind } : {}),
   }
 }
 

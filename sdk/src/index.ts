@@ -101,12 +101,19 @@ function init(opts: IBridleInitOptions): IBridleInstance {
     open?: () => void
     close?: () => void
     sendMessage?: (text: string) => void
+    tokenProvider?: () => string | Promise<string>
   }
   el.setAttribute('api-url', apiUrl)
   el.setAttribute('agent-id', opts.agentId)
   if (opts.mode) el.setAttribute('mode', opts.mode)
   if (opts.title) el.setAttribute('title', opts.title)
   if (opts.placeholder) el.setAttribute('placeholder', opts.placeholder)
+  if (opts.accept) el.setAttribute('accept', opts.accept)
+  if (opts.uploadUrl) el.setAttribute('upload-url', opts.uploadUrl)
+  // Set only when the integrator said so: absent means the widget default (on).
+  if (opts.enableImages !== undefined) {
+    el.setAttribute('enable-images', String(opts.enableImages))
+  }
   if (opts.theme) el.setAttribute('theme', opts.theme)
   if (opts.colorMode) el.setAttribute('color-mode', opts.colorMode)
   if (opts.prompt) el.setAttribute('prompt', opts.prompt)
@@ -123,6 +130,9 @@ function init(opts: IBridleInitOptions): IBridleInstance {
   if (opts.emptyAvatar) el.setAttribute('empty-avatar', opts.emptyAvatar)
   if (opts.emptyTitle) el.setAttribute('empty-title', opts.emptyTitle)
   if (opts.emptySubtitle) el.setAttribute('empty-subtitle', opts.emptySubtitle)
+  // Empty string is meaningful here — it hides the work log entirely — so this
+  // one is checked against undefined rather than for truthiness.
+  if (opts.thinkingLabel !== undefined) el.setAttribute('thinking-label', opts.thinkingLabel)
   if (opts.suggestions?.length) {
     // Serialize as JSON so the component's parser round-trips multi-line /
     // pipe-containing strings without surprises.
@@ -131,21 +141,22 @@ function init(opts: IBridleInitOptions): IBridleInstance {
 
   applyThemeVars(el, opts.themeVars)
 
-  // Resolve the token. Static strings are set immediately; functions are called
-  // and the result is set when ready. The Vue prop-watcher inside the element
-  // triggers connect once token is non-empty. If no token is provided (public
-  // bot), set an empty string so the watcher still fires.
+  if (opts.sessionExpiredLabel) el.setAttribute('session-expired-label', opts.sessionExpiredLabel)
+  if (opts.reconnectLabel) el.setAttribute('reconnect-label', opts.reconnectLabel)
+  if (opts.reloadLabel) el.setAttribute('reload-label', opts.reloadLabel)
+
+  // A static token goes into the observable `token` attribute; setting it
+  // again later (`setToken`) reconnects with the new one. A function is kept
+  // as a PROVIDER on a JS property, not resolved once here: the element calls
+  // it for the first token and every renewal after that (CLEAN-188). No token
+  // (public bot) is an empty attribute.
   const setToken = (t: string): void => {
     el.setAttribute('token', t)
   }
-  if (opts.token === undefined) {
-    setToken('')
-  } else if (typeof opts.token === 'function') {
-    Promise.resolve(opts.token())
-      .then(setToken)
-      .catch((err) => opts.onError?.(err instanceof Error ? err : new Error(String(err))))
+  if (typeof opts.token === 'function') {
+    el.tokenProvider = opts.token
   } else {
-    setToken(opts.token)
+    setToken(opts.token ?? '')
   }
 
   // Mount target. CSS selector or HTMLElement; default = body.
@@ -177,12 +188,14 @@ function init(opts: IBridleInitOptions): IBridleInstance {
       opts.onError?.((e as unknown as CustomEvent<Error>).detail),
     )
   }
+  if (opts.onTokenExpired) el.addEventListener('token-expired', () => opts.onTokenExpired?.())
 
   return {
     element: el,
     open: () => el.open?.(),
     close: () => el.close?.(),
     sendMessage: (text: string) => el.sendMessage?.(text),
+    setToken,
     destroy: () => el.remove(),
   }
 }
@@ -225,6 +238,9 @@ function autoMount(): void {
     mode: (ds.mode as 'floating' | 'inline' | undefined) ?? 'floating',
     title: ds.title,
     placeholder: ds.placeholder,
+    accept: ds.accept,
+    uploadUrl: ds.uploadUrl,
+    enableImages: ds.enableImages === undefined ? undefined : ds.enableImages !== 'false',
     theme: ds.theme as 'default' | 'cleanslice' | undefined,
     colorMode: ds.colorMode as 'auto' | 'light' | 'dark' | undefined,
     prompt: ds.prompt,
@@ -237,6 +253,10 @@ function autoMount(): void {
     emptyAvatar: ds.emptyAvatar,
     emptyTitle: ds.emptyTitle,
     emptySubtitle: ds.emptySubtitle,
+    thinkingLabel: ds.thinkingLabel,
+    sessionExpiredLabel: ds.sessionExpiredLabel,
+    reconnectLabel: ds.reconnectLabel,
+    reloadLabel: ds.reloadLabel,
     suggestions: ds.suggestions ? parseSuggestionsAttr(ds.suggestions) : undefined,
     customCss: ds.customCss,
     stylesheets,

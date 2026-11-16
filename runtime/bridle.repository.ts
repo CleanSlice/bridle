@@ -193,6 +193,15 @@ export type SyncHandler = () => Promise<{ pushed: number }>
 /** Toggle handler — fired when the hub pushes a debug_set command. */
 export type DebugToggleHandler = (enabled: boolean) => void
 
+/**
+ * Session-clear handler — fired when the hub pushes a `session_clear`
+ * command after archiving/deleting a channel's persisted transcript
+ * server-side. Wire this to your own session store's clear/reset so this
+ * runtime's local copy doesn't outlive (and get re-synced over) what the
+ * hub just deleted.
+ */
+export type SessionClearHandler = (channel: string) => void
+
 // ── Repository ───────────────────────────────────────────────
 
 /**
@@ -202,8 +211,11 @@ export type DebugToggleHandler = (enabled: boolean) => void
  * Flow:  Browser ↔ /ws/client ↔ Bridle Hub ↔ /ws/agent ↔ Agent (this)
  *
  * Events (Hub → Agent):
- *   "message"  { clientId, text, parts, messageId, prompt? }
- *   "pong"     {}
+ *   "message"       { clientId, text, parts, messageId, prompt? }
+ *   "debug_set"     { enabled }
+ *   "sync"          { requestId }
+ *   "session_clear" { channel }
+ *   "pong"          {}
  *
  * Events (Agent → Hub):
  *   "register"     {}
@@ -219,6 +231,7 @@ export class BridleRepository implements IChannelGateway {
   private handler?: (msg: IBridleMessageData) => Promise<void>
   private debugToggleHandler?: DebugToggleHandler
   private syncHandler?: SyncHandler
+  private sessionClearHandler?: SessionClearHandler
   private socket: Socket | null = null
   private apiUrl: string
 
@@ -247,6 +260,27 @@ export class BridleRepository implements IChannelGateway {
     })
   }
 
+  /**
+   * Send a NOTE — a line of the agent's reasoning, or the tool it is about to
+   * reach for. Not the answer: the browser folds the notes of one turn into a
+   * single collapsible work-log row above the reply, and never into the reply
+   * itself. See docs/PROTOCOL.md § Notes.
+   *
+   * Send these BETWEEN `typing` and the end of the stream — that window is
+   * what makes them notes even for receivers that ignore `kind`.
+   */
+  async note(to: string, text: string, kind: 'thinking' | 'tool' = 'thinking'): Promise<void> {
+    if (!text.trim()) return
+    this.socket?.emit('message', {
+      clientId: to,
+      text,
+      parts: [{ type: BridlePartTypes.Text as const, text }],
+      kind,
+      messageId: randomUUID(),
+      ts: Date.now(),
+    })
+  }
+
   onMessage(handler: (msg: IBridleMessageData) => Promise<void>): void {
     this.handler = handler
   }
@@ -267,6 +301,14 @@ export class BridleRepository implements IChannelGateway {
    */
   onSync(handler: SyncHandler): void {
     this.syncHandler = handler
+  }
+
+  /**
+   * Register a handler for the hub's session_clear command (sent after the
+   * hub archives/deletes a channel's persisted transcript).
+   */
+  onSessionClear(handler: SessionClearHandler): void {
+    this.sessionClearHandler = handler
   }
 
   /**
@@ -414,6 +456,16 @@ export class BridleRepository implements IChannelGateway {
           error: (err as Error).message ?? 'sync failed',
         })
       }
+    })
+
+    // Hub → Agent: the hub archived/deleted a channel's persisted transcript
+    // (e.g. the embed's "New chat" action) and wants this runtime to drop its
+    // own local/in-memory copy too, so it doesn't re-sync the "deleted"
+    // history back over the hub's storage on the next local change.
+    this.socket.on('session_clear', (data: unknown) => {
+      const channel = (data as Record<string, unknown> | undefined)?.channel as string | undefined
+      if (!channel) return
+      this.sessionClearHandler?.(channel)
     })
 
     this.socket.on('connect_error', (err) => {

@@ -4,10 +4,11 @@ import { storeToRefs } from 'pinia'
 import { useBridleStore } from '../../stores/bridle'
 import Message from './Message.vue'
 import Input from './Input.vue'
+import Thinking from './Thinking.vue'
 import { Card, CardContent, CardFooter, CardHeader } from '#theme/components/ui/card'
 import { ScrollArea } from '#theme/components/ui/scroll-area'
 import { Button } from '#theme/components/ui/button'
-import { Bot, Circle, MessageSquarePlus } from 'lucide-vue-next'
+import { Bot, Circle, Loader2, MessageSquarePlus } from 'lucide-vue-next'
 import { cn } from '#theme/utils/cn'
 
 const props = withDefaults(defineProps<{
@@ -21,18 +22,51 @@ const props = withDefaults(defineProps<{
   channel?: string
   showNewChatButton?: boolean
   resetConfirmText?: string
+  /**
+   * Caption of the collapsed work-log row — the block holding the agent's
+   * reasoning for a turn. Default: "Work log".
+   */
+  thinkingLabel?: string
 }>(), {
   title: 'Agent Chat',
   placeholder: 'Type a message...',
   showStatus: true,
   channel: 'admin',
   showNewChatButton: true,
+  thinkingLabel: 'Work log',
   resetConfirmText:
     'Delete the saved transcript and start fresh? Past messages will be removed from storage. The agent\'s in-memory context may persist until its next restart.',
 })
 
 const store = useBridleStore()
 const { messages, isConnected, isTyping, connectionError } = storeToRefs(store)
+
+// What the error banner actually renders. The hub often rejects the very
+// first handshake (auth token lags a beat behind mount), then the automatic
+// reconnect succeeds — a raw `connectionError` would flash the red banner
+// for ~1s on every load. Only surface an error still standing after
+// ERROR_SETTLE_MS; until then the header shows a spinner instead of the red
+// dot. Must stay BELOW the socket's reconnectionDelay (2000ms) or each
+// retry's fresh error would reset the timer and a genuine failure would
+// never surface.
+const ERROR_SETTLE_MS = 1500
+const displayedError = ref<typeof connectionError.value>(null)
+let errorSettleTimer: ReturnType<typeof setTimeout> | null = null
+
+watch(connectionError, (err) => {
+  if (errorSettleTimer) {
+    clearTimeout(errorSettleTimer)
+    errorSettleTimer = null
+  }
+  if (!err) {
+    displayedError.value = null
+    return
+  }
+  errorSettleTimer = setTimeout(() => {
+    errorSettleTimer = null
+    displayedError.value = connectionError.value
+  }, ERROR_SETTLE_MS)
+})
 
 const scrollRef = ref<InstanceType<typeof ScrollArea> | null>(null)
 
@@ -53,6 +87,10 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  if (errorSettleTimer) {
+    clearTimeout(errorSettleTimer)
+    errorSettleTimer = null
+  }
   store.disconnect()
 })
 
@@ -100,38 +138,46 @@ async function onNewChat() {
           New chat
         </Button>
         <div v-if="showStatus" class="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <Circle
-            :class="cn('h-2 w-2 fill-current', isConnected ? 'text-green-500' : 'text-red-500')"
-          />
-          {{ isConnected ? 'Connected' : 'Disconnected' }}
+          <template v-if="isConnected">
+            <Circle class="h-2 w-2 fill-current text-green-500" />
+            Connected
+          </template>
+          <template v-else-if="displayedError">
+            <Circle class="h-2 w-2 fill-current text-red-500" />
+            Disconnected
+          </template>
+          <template v-else>
+            <Loader2 class="h-3 w-3 animate-spin" />
+            Connecting…
+          </template>
         </div>
       </div>
     </CardHeader>
 
     <div
-      v-if="connectionError"
+      v-if="displayedError"
       role="alert"
       class="border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-xs leading-relaxed text-destructive"
     >
-      <template v-if="connectionError.code === 'ORIGIN_NOT_ALLOWED'">
+      <template v-if="displayedError.code === 'ORIGIN_NOT_ALLOWED'">
         Origin
-        <code class="rounded bg-destructive/15 px-1 py-0.5 font-mono text-[11px]">{{ (connectionError.details?.origin as string) || 'this page' }}</code>
+        <code class="rounded bg-destructive/15 px-1 py-0.5 font-mono text-[11px]">{{ (displayedError.details?.origin as string) || 'this page' }}</code>
         isn't whitelisted for this agent. Add it in the agent's allowed origins.
       </template>
-      <template v-else-if="connectionError.code === 'MISSING_TOKEN'">
+      <template v-else-if="displayedError.code === 'MISSING_TOKEN'">
         Authentication required — provide a JWT for this agent.
       </template>
-      <template v-else-if="connectionError.code === 'INVALID_TOKEN'">
+      <template v-else-if="displayedError.code === 'INVALID_TOKEN'">
         The provided token is invalid or expired.
       </template>
-      <template v-else-if="connectionError.code === 'MISSING_AGENT_ID'">
+      <template v-else-if="displayedError.code === 'MISSING_AGENT_ID'">
         Missing <code class="rounded bg-destructive/15 px-1 py-0.5 font-mono text-[11px]">agentId</code> on the connection.
       </template>
-      <template v-else-if="connectionError.code === 'TRANSPORT_ERROR'">
-        Can't reach the hub: {{ connectionError.message || 'transport error' }}
+      <template v-else-if="displayedError.code === 'TRANSPORT_ERROR'">
+        Can't reach the hub: {{ displayedError.message || 'transport error' }}
       </template>
       <template v-else>
-        {{ connectionError.message || connectionError.code || 'Connection error' }}
+        {{ displayedError.message || displayedError.code || 'Connection error' }}
       </template>
     </div>
 
@@ -145,11 +191,12 @@ async function onNewChat() {
             Start a conversation with the agent
           </div>
 
-          <Message
-            v-for="msg in messages"
-            :key="msg.id"
-            :message="msg"
-          />
+          <template v-for="msg in messages" :key="msg.id">
+            <!-- A work-log entry carries the turn's reasoning instead of an
+                 answer, and is drawn as a collapsed row rather than a bubble. -->
+            <Thinking v-if="msg.steps" :message="msg" :label="thinkingLabel" />
+            <Message v-else :message="msg" />
+          </template>
 
           <div v-if="isTyping" class="flex gap-3 mr-auto">
             <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted">

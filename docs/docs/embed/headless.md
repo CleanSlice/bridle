@@ -56,9 +56,17 @@ interface IBridleClientOptions {
   apiUrl: string
   agentId: string
   token: string | (() => string | Promise<string>)
+  // Optional: your own token source, used instead of `token`. `force: true`
+  // must bypass any cache (the hub just rejected the current token).
+  getToken?: (options?: { force?: boolean }) => Promise<string>
+  canRefreshToken?: boolean // default: true with getToken, "token is a function" otherwise
   channel?: string         // optional; default 'web'
 }
 ```
+
+### `client.authorizedFetch(url, init?): Promise<Response>`
+
+`fetch` against the hub with the current token as `Authorization: Bearer`. On `401` it renews the token (when it can) and retries once. Use it for the HTTP endpoints, e.g. `/api/agent/:id/transcript`.
 
 ### `client.connect(): Promise<void>`
 
@@ -125,7 +133,11 @@ Handle both — agents may stream some responses and not others (e.g., quick can
 
 ## Reconnect behavior
 
-The underlying `socket.io-client` reconnects automatically on disconnect. If your token has expired, the next reconnect will fail with `error: 'invalid token'` — fetch a fresh token and call `disconnect()` then `connect()` to retry with the new one. If you passed a function as `token`, simply `disconnect(); connect();` is enough — the function is called again.
+The underlying `socket.io-client` reconnects automatically on disconnect (network drop, sleep, hub restart), and every handshake asks for the current token.
+
+With a **function** `token` the client renews on its own: it caches the token until ~60 s before its `exp`, refreshes it then, and when the hub still rejects a token (`bridle_error` `TOKEN_EXPIRED` / `INVALID_TOKEN`, after which the hub drops the socket) it calls the function again and reconnects. A renewed token that is rejected again within 30 s is reported through `error` as a `BridleAuthError` — no retry loop.
+
+With a **string** `token` nothing can be renewed: the rejection arrives as a `BridleAuthError` with `code: 'TOKEN_EXPIRED'` (or `'INVALID_TOKEN'`). Create a new client with a fresh token to continue.
 
 ## When to use headless vs the widget
 

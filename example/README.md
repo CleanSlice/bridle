@@ -47,7 +47,7 @@ All values live in `.env`. See [.env.example](./.env.example) for the full list.
 | `RANCH_API_URL` | no | Ranch hub origin. Default: `http://localhost:3333`. |
 | `RANCH_API_KEY` | **yes** | Server-side key used to mint embed JWTs. Never sent to the browser. |
 | `BRIDLE_AGENT_ID` | **yes** | The agent id the embed connects to. |
-| `RANCH_EMBED_TOKEN_TTL` | no | JWT lifetime, e.g. `7d`, `15m`. Default: `7d`. |
+| `RANCH_EMBED_TOKEN_TTL` | no | JWT lifetime, e.g. `15m`, `1m`. Default: `15m` — the provider widget renews on its own; open the page with `?ttl=1m` to watch it. |
 | `PORT` | no | Port the example server listens on. Default: `8787`. |
 
 ## How the auth flow works

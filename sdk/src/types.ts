@@ -85,6 +85,25 @@ export interface IBridleUiSubmitPart {
   values: Record<string, BridleUiValue>
 }
 
+// ── Work log (the agent's reasoning) ──────────────────────────
+// An agent that reasons out loud sends those lines as `message` frames
+// DURING a turn. They are not the answer and must not land in the answer's
+// bubble; the widget folds them into one collapsible work-log entry above it.
+// See docs/PROTOCOL.md § Notes (agent reasoning).
+
+/** What a `message` frame is, when it is not the answer. */
+export type BridleMessageKind = 'thinking' | 'tool'
+
+/** One line of the work log. */
+export interface IBridleThinkingStep {
+  id: string
+  text: string
+  /** `tool` steps are the agent reaching for something, not thinking about it. */
+  kind: BridleMessageKind
+  /** The last step of a live log is still running; everything else is done. */
+  running: boolean
+}
+
 export interface IBridleMessage {
   id: string
   role: 'user' | 'assistant'
@@ -93,6 +112,16 @@ export interface IBridleMessage {
   ts: number
   /** True between `stream` and `stream_end` events. */
   streaming?: boolean
+  /**
+   * Present ONLY on a work-log entry — a synthetic assistant message that
+   * holds the notes of one turn instead of an answer. `text`/`parts` stay
+   * empty on it, so anything walking the transcript for content skips it.
+   */
+  steps?: IBridleThinkingStep[]
+  /** The turn that produced this work log is still running. */
+  live?: boolean
+  /** Set on incoming frames the runtime marked as a note. */
+  kind?: BridleMessageKind
 }
 
 export interface IBridleInitOptions {
@@ -106,9 +135,14 @@ export interface IBridleInitOptions {
   agentId: string
   /**
    * JWT used to authenticate the browser to the hub. Pass a string for static
-   * tokens, or a function returning a string/Promise<string> for refresh.
-   * Omit when the bot is configured as public on the hub — the hub will
-   * accept the connection based on the request `Origin` header.
+   * tokens, or a function returning a string/Promise<string> for refresh:
+   * it is called once for the first token and again whenever the hub turns
+   * the current one away (`TOKEN_EXPIRED` / `INVALID_TOKEN` on reconnect, 401
+   * on HTTP), and the chat reconnects without clearing the conversation. A
+   * static string cannot be renewed — once it expires the chat stays rejected
+   * until the page reloads. Omit when the bot is configured as public on the
+   * hub — the hub will accept the connection based on the request `Origin`
+   * header.
    */
   token?: string | (() => string | Promise<string>)
   /**
@@ -158,6 +192,38 @@ export interface IBridleInitOptions {
    * Same use-case as `customCss` but kept in an external file you can cache.
    */
   stylesheets?: string | string[]
+  /**
+   * `accept` attribute for the attachment picker. Defaults to `image/*`,
+   * which is everything the widget can send inline.
+   *
+   * Widening this only changes what the file dialog offers. A picked file
+   * that is not an image needs `uploadUrl` — without it the widget says so
+   * rather than dropping the file quietly.
+   */
+  accept?: string
+  /**
+   * Endpoint that stores a non-image attachment and answers with its URL.
+   *
+   * Bridle's protocol carries documents as `{ type: 'file', url, name,
+   * mimeType }`, so the bytes have to live somewhere the agent can fetch
+   * them; the hub deliberately does not host them. Point this at whatever
+   * does in your deployment.
+   *
+   * Contract: `POST <uploadUrl>` as `multipart/form-data` with the file in
+   * a `file` field, answering `{ url, name?, mimeType? }` — or the same
+   * object under a `data` key, which is what an envelope-style API returns.
+   * The bearer token passed to `init` is forwarded as `Authorization`.
+   */
+  uploadUrl?: string
+  /**
+   * Pictures in the conversation, both directions. Defaults to `true`.
+   *
+   * `false` hides the attachment picker and refuses pasted or dropped
+   * images, and tells the agent this client cannot render them - so it stops
+   * sending picture replies too. Documents still work when `uploadUrl` is
+   * configured: the picker stays for them.
+   */
+  enableImages?: boolean
   /**
    * URL of the icon shown on the floating FAB in place of the built-in
    * chat-bubble glyph. Any URL the browser can render in `<img>` works —
@@ -211,10 +277,29 @@ export interface IBridleInitOptions {
    * string — both are accepted).
    */
   suggestions?: string[]
+  /**
+   * Caption of the collapsed work-log row — the block that holds the agent's
+   * reasoning while it works. Default: "Work log". Pass an empty string to
+   * drop the reasoning entirely and show answers only.
+   */
+  thinkingLabel?: string
+  /** Banner text when the session expired and could not be renewed. Default: "Your session has expired." */
+  sessionExpiredLabel?: string
+  /** Banner button that gets a new token and reconnects. Default: "Reconnect". */
+  reconnectLabel?: string
+  /** Banner button shown for a static token, which only a reload can replace. Default: "Reload the page". */
+  reloadLabel?: string
   /** Hooks for headless side effects in addition to the UI. */
   onReady?: () => void
   onMessage?: (message: IBridleMessage) => void
   onError?: (error: Error) => void
+  /**
+   * The hub rejected the token and the widget cannot get a new one itself —
+   * `token` is a static string. Answer with `instance.setToken(newToken)`;
+   * the widget reconnects and keeps the conversation. Not called when `token`
+   * is a provider function: the widget renews on its own.
+   */
+  onTokenExpired?: () => void
 }
 
 export interface IBridleInstance {
@@ -226,6 +311,12 @@ export interface IBridleInstance {
   close: () => void
   /** Programmatically send a user message. */
   sendMessage: (text: string) => void
+  /**
+   * Replace the token (for static-token integrations, typically from
+   * `onTokenExpired`). Reconnects with it and keeps the conversation on screen.
+   * Same as setting the element's `token` attribute.
+   */
+  setToken: (token: string) => void
   /** Tear down the widget and disconnect. */
   destroy: () => void
 }

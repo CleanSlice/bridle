@@ -20,12 +20,15 @@ When the script loads, it auto-registers a `<bridle-chat>` Custom Element and mo
 | Attribute | Default | Description |
 |-----------|---------|-------------|
 | `data-agent-id` | **required** | Bot identifier registered on the hub |
-| `data-token` | **required** | JWT for browser auth — signed by your backend |
+| `data-token` | **required** | JWT for browser auth — signed by your backend. A static attribute cannot be renewed: for sessions longer than the token's TTL use [`init()` with a token provider](/embed/npm#token-refresh), or set a new `token` attribute on `<bridle-chat>` when it fires `token-expired` |
 | `data-api-url` | inferred from script's origin | Hub URL, e.g. `https://hub.example.com` |
 | `data-mode` | `floating` | `floating` (FAB in corner) or `inline` (inside `data-mount`) |
 | `data-mount` | `<body>` | CSS selector for inline mode, e.g. `#chat-container` |
 | `data-title` | `Agent Chat` | Header text |
 | `data-placeholder` | `Type a message...` | Input placeholder |
+| `data-accept` | `image/*` | File types the attachment picker offers. See [Attachments](/embed/npm#attachments) |
+| `data-upload-url` | optional | Endpoint that stores a non-image attachment and answers with its URL |
+| `data-enable-images` | `true` | Pictures in the conversation, both directions. `false` hides the picker, refuses pasted and dropped images, and stops the agent sending them |
 | `data-custom-css` | optional | Inline CSS injected into the shadow root — see [Theming › Overriding internal classes](/embed/theming#overriding-internal-classes) |
 | `data-stylesheet` | optional | Stylesheet URL(s) loaded into the shadow root. Comma-separate for multiple files |
 | `data-fab-icon` | optional | URL of an image to replace the FAB's built-in chat-bubble glyph (floating mode). See [Theming › Custom FAB icon](/embed/theming#custom-fab-icon) |
@@ -35,7 +38,11 @@ When the script loads, it auto-registers a `<bridle-chat>` Custom Element and mo
 | `data-empty-avatar` | optional | URL of an avatar shown on the empty-state screen. See [Empty state](#empty-state) |
 | `data-empty-title` | optional | Headline shown on the empty-state screen, e.g. "What can I help with?" |
 | `data-empty-subtitle` | optional | Sub-line shown under `data-empty-title` |
+| `data-thinking-label` | `Work log` | Caption of the collapsed work-log row — the block holding the agent's reasoning for a turn. Set to an empty string to hide reasoning entirely. See [Work log](#work-log) |
 | `data-suggestions` | optional | Suggestion chips rendered on the empty state. Pipe-separated (`Q1|Q2|Q3`) or a JSON array string. Clicking a chip sends it as a user message |
+| `data-session-expired-label` | `Your session has expired.` | Banner text when the hub no longer accepts the token and it could not be renewed |
+| `data-reconnect-label` | `Reconnect` | Banner button that gets a new token and reconnects |
+| `data-reload-label` | `Reload the page` | Banner button shown for a static token |
 
 ## Choosing where to load the script from
 
@@ -123,6 +130,33 @@ init({
 - **Long replies as chips** — chip text becomes the entire user message. Keep them short prompts ("Pricing?"), not full sentences the visitor wouldn't have typed.
 - **A FAQ list** — chips are for *opening* the conversation, not a static knowledge base. After the first user turn they're gone.
 - **Forms / structured input** — chips send free text. For "pick a plan: Basic / Pro / Team" structured selection, the runtime should emit assistant messages with parts of type the renderer understands (not a feature of the SDK today).
+
+## Work log
+
+Agents that reason out loud send those lines while they work — a thought per
+step, a line per tool they reach for. The widget does **not** draw them as
+answers. Every note of one turn folds into a single collapsed row above the
+reply:
+
+```
+✦ Work log                                   · 3 steps  ›
+```
+
+While the agent is still working the row shows the step it is on right now
+next to a spinner, so a long chain never looks like a hung page; when the
+answer lands the row settles to its caption. Clicking it reveals the whole
+trace. It starts collapsed and stays collapsed unless the visitor opens it.
+
+Rename the row with `data-thinking-label`, or hide reasoning altogether:
+
+```html
+<script src="…" data-thinking-label=""></script>
+```
+
+Nothing is required on the agent side — a runtime that sends its notes between
+`typing` and `stream_end` gets this for free. Marking them explicitly with
+`kind: "thinking" | "tool"` is preferred and documented in the
+[protocol](/protocol/websocket).
 
 ## Welcome message
 

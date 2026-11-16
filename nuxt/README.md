@@ -66,6 +66,7 @@ Full chat widget. Handles connection lifecycle, message display, and input.
 | `placeholder` | string | no | `'Type a message...'` | Input placeholder |
 | `class` | string | no | -- | Additional CSS classes on the card |
 | `showStatus` | boolean | no | `true` | Show connection status indicator |
+| `thinkingLabel` | string | no | `'Work log'` | Caption of the collapsed work-log row (the agent's reasoning for a turn) |
 
 Connects on mount, disconnects on unmount. Shows a typing indicator when the agent is processing.
 
@@ -84,6 +85,23 @@ Renders each part type:
 - **Image** -- `<img>` with base64 data URI
 - **File** -- download link with file icon
 - Falls back to plain `text` if `parts` is empty
+
+### `BridleThinking`
+
+The work log: one collapsed row per turn holding what the agent thought and
+which tools it reached for. Rendered by `BridleProvider` in place of a bubble
+whenever a message carries `steps`.
+
+**Props:**
+
+| Prop | Type | Description |
+|------|------|-------------|
+| `message` | `IBridleMessageData` | A work-log entry — `steps[]` and `live` instead of `text` |
+| `label` | string | Caption once the turn has finished. Default `'Work log'` |
+
+While the turn runs the row shows the step the agent is on right now next to a
+spinner; afterwards it settles to `label`. Collapsed by default — only the
+visitor opens it.
 
 ### `BridleInput`
 
@@ -172,7 +190,7 @@ The store listens for these events from the hub:
 | Event | Handled by | Description |
 |-------|-----------|-------------|
 | `welcome` | Sets `clientId` | Connection confirmed |
-| `message` | Pushes to `messages` | Complete response with `text` + `parts` |
+| `message` | Pushes to `messages`, or appends a work-log step | A response — or a NOTE (the agent's reasoning) when `kind` is set or a turn is open. See [PROTOCOL.md § Notes](../docs/PROTOCOL.md#notes-agent-reasoning) |
 | `typing` | Sets `isTyping = true` | Agent started processing |
 | `stream` | Updates/pushes message | Accumulated text + parts (replace, not append) |
 | `stream_end` | Finalizes message | Streaming complete, `streaming = false` |
@@ -198,6 +216,7 @@ nuxt/
     └── bridle/
         ├── Provider.vue               # Full chat widget
         ├── Message.vue                # Message bubble (renders parts)
+        ├── Thinking.vue                # Work log — the agent's reasoning for a turn
         ├── Input.vue                  # Text input + send button
         └── index.ts                   # Re-exports components
 ```

@@ -44,20 +44,25 @@ export class BridleController {
     const clientId = 'sync-' + crypto.randomUUID()
     const chunks: string[] = []
 
+    // clientId is freshly minted above (never reused across calls), so it
+    // doubles as its own socket identity here — no real connection to track.
+    const socketId = clientId
+
     return new Promise((resolve) => {
       const timeout = setTimeout(() => {
-        this.hub.unregisterClient(clientId)
+        this.hub.unregisterClient(clientId, socketId)
         resolve({ text: chunks.join('') || 'Timeout: no response from agent', messageId: '', ts: Date.now() })
       }, 120_000)
 
       this.hub.registerClient(
         clientId,
         agentId,
+        socketId,
         (data: unknown) => {
           const event = data as Record<string, unknown>
           if (event.type === 'message' || event.type === 'stream_end') {
             clearTimeout(timeout)
-            this.hub.unregisterClient(clientId)
+            this.hub.unregisterClient(clientId, socketId)
             resolve({ text: event.text ?? chunks.join(''), messageId: event.messageId, ts: event.ts })
           } else if (event.type === 'stream') {
             chunks.push((event.text as string) ?? '')
@@ -135,7 +140,13 @@ export class BridleController {
       await this.transcripts.delete(agentId, channel)
     } catch (err) {
       this.logger.warn(`Transcript reset failed for ${agentId}/${channel}: ${(err as Error).message}`)
+      return
     }
+    // Tell the live agent to drop its own local/in-memory copy too — a
+    // persistent IBridleTranscriptGateway (e.g. S3-backed) only touches its
+    // own storage, and the running agent would otherwise re-upload its
+    // still-intact local session file on the next local change.
+    this.hub.clearAgentSession(agentId, channel)
   }
 
   @ApiOperation({
@@ -152,11 +163,16 @@ export class BridleController {
     @Query('channel') channelRaw?: string,
   ): Promise<{ archivedPath?: string }> {
     const channel = (channelRaw ?? 'admin').trim() || 'admin'
+    let result: { archivedPath?: string }
     try {
-      return await this.transcripts.archive(agentId, channel)
+      result = await this.transcripts.archive(agentId, channel)
     } catch (err) {
       this.logger.warn(`Transcript archive failed for ${agentId}/${channel}: ${(err as Error).message}`)
       return {}
     }
+    // Tell the live agent to drop its own local/in-memory copy too — see the
+    // comment in resetTranscript above.
+    this.hub.clearAgentSession(agentId, channel)
+    return result
   }
 }

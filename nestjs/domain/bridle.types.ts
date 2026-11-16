@@ -142,6 +142,12 @@ export interface IBridleOutgoingEvent {
   parts?: BridlePart[]
   messageId?: string
   ts?: number
+  /**
+   * Set on `message` events only: this frame is a NOTE — the agent's
+   * reasoning, not its answer. The hub relays it untouched; the browser folds
+   * notes into one collapsible work-log row. See docs/PROTOCOL.md § Notes.
+   */
+  kind?: 'thinking' | 'tool'
   /** Set on `agent_status` events emitted by the hub. */
   agentId?: string
   /** Set on `agent_status` events: true when an agent runtime is currently registered. */
@@ -221,6 +227,8 @@ export interface IBridleAgentHealthData {
 /** Registered client metadata */
 export interface IBridleClientData {
   agentId: string
+  /** Owning socket/connection id — see IBridleGateway.unregisterClient. */
+  socketId: string
   send: (data: unknown) => void
   /**
    * True when the JWT carried an admin role. Admin clients receive admin-only
