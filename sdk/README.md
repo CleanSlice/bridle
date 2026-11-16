@@ -31,6 +31,9 @@ The script auto-mounts a floating chat bubble in the bottom-right corner. If the
 | `data-enable-images` | `true` | Pictures in the conversation, both directions. `false` turns them off |
 | `data-custom-css` | optional | Inline CSS injected into the shadow root |
 | `data-stylesheet` | optional | Stylesheet URL(s) loaded into the shadow root (comma-separate for multiple) |
+| `data-popup` | off | Proactive teaser card above the closed FAB. Setting a text enables it; markdown supported |
+| `data-popup-title` | optional | Bold headline of the teaser |
+| `data-popup-delay` | `3000` | Milliseconds after load before the teaser appears; `0` = immediately |
 
 ## Programmatic init
 
@@ -56,6 +59,27 @@ chat.close()
 chat.setToken(jwt)             // replace a static token; reconnects, keeps the chat
 chat.destroy()
 ```
+
+## Auto-popup (proactive teaser)
+
+In floating mode the widget can show a small dismissible card above the
+closed bubble inviting the visitor to chat:
+
+```js
+init({
+  agentId: 'agent-…',
+  popup: 'Have a question? I can compare plans or book a demo.',
+  popupTitle: "👋 Hi, I'm the assistant!",
+  popupDelay: 2000, // ms, default 3000
+})
+```
+
+Omit `popup` to disable the teaser entirely. Clicking the card opens the
+chat; the ✕ button (or Escape) dismisses it. Either way the choice is
+remembered per agent in `localStorage` (`bridle:popup-dismissed:<agentId>`)
+and the teaser never re-appears for that visitor. Restyle it via
+`customCss` targeting `.bridle__popup`, `.bridle__popup-card`,
+`.bridle__popup-title`, `.bridle__popup-body`, `.bridle__popup-close`.
 
 ## Token refresh
 

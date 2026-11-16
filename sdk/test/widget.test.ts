@@ -191,3 +191,44 @@ describe('BridleChat with pictures turned off', () => {
     expect(wrapper!.find('.bridle__attach').exists()).toBe(true)
   })
 })
+
+/**
+ * The auto-popup is a teaser above the closed floating bubble. It waits out
+ * `popupDelay` before it shows, and a visitor who dismissed it never sees it
+ * again - the flag is kept per agent in localStorage.
+ */
+describe('BridleChat with an auto-popup teaser', () => {
+  const DISMISSED_KEY = 'bridle:popup-dismissed:agent'
+  const teaser = { token: 't', mode: 'floating', popup: 'Have a question?', popupTitle: 'Hi there', popupDelay: 5_000 }
+
+  beforeEach(() => {
+    window.localStorage.removeItem(DISMISSED_KEY)
+    valid.add('t')
+  })
+
+  it('appears above the closed bubble once the delay has passed', async () => {
+    const chat = mountChat(teaser)
+    await settle()
+    expect(chat.find('.bridle__popup').exists()).toBe(false)
+
+    await vi.advanceTimersByTimeAsync(3_000)
+
+    expect(chat.find('.bridle__popup-title').text()).toBe('Hi there')
+    expect(chat.find('.bridle__popup-body').text()).toBe('Have a question?')
+    expect(chat.find('.bridle--open').exists()).toBe(false)
+  })
+
+  it('stays away after the visitor dismissed it, on the next page load too', async () => {
+    const chat = mountChat(teaser)
+    await vi.advanceTimersByTimeAsync(5_000)
+    await chat.find('.bridle__popup-close').trigger('click')
+
+    expect(chat.find('.bridle__popup').exists()).toBe(false)
+    expect(window.localStorage.getItem(DISMISSED_KEY)).toBe('1')
+
+    chat.unmount()
+    const again = mountChat(teaser)
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(again.find('.bridle__popup').exists()).toBe(false)
+  })
+})
