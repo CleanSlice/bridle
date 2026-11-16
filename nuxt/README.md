@@ -113,6 +113,10 @@ Text input with send button. Enter sends, Shift+Enter for newline.
 |------|------|-------------|
 | `placeholder` | string | Input placeholder text |
 | `disabled` | boolean | Disable input (e.g. when disconnected) |
+| `sendDisabled` | boolean | Send and Enter do nothing, the field stays editable — the agent's request limit is full |
+| `describedBy` | string | Id of the element that says why Send is off (`aria-describedby`) |
+
+Exposes `restore(text)`, which puts a refused message back into the field.
 
 **Events:**
 
@@ -157,6 +161,14 @@ store.clearMessages()
 | `isTyping` | `boolean` | Agent is generating a response |
 | `isOpen` | `boolean` | UI open/closed state (for toggle widgets) |
 | `clientId` | `string \| null` | Assigned by hub on `welcome` event |
+| `isLimited` | `boolean` (getter) | The agent's request limit is full; `sendMessage()` sends nothing and returns `false` |
+| `limitRemainingMs` | `number` | What is left of the wait, refreshed once a second |
+| `limitWindow` | `'minute' \| 'hour' \| 'day' \| null` | The window that set the wait |
+| `returnedDraft` | `{ id, text } \| null` | A message the hub refused for the limit; `BridleProvider` hands its text back to the input |
+
+### Request limits
+
+A hub can cap the requests an agent takes per minute, hour and day. `sendMessage()` sends a `clientMessageId` and asks for an acknowledgement; on `RATE_LIMITED` the store takes the optimistic bubble back, stops the typing dots, starts the wait and fills `returnedDraft`. An `agent_limit` event from the hub starts or ends the wait without a send. `BridleProvider` shows one line above the input — "This agent has reached its message limit. Try again in 0:42." (props `limitLabel`, `limitRetryLabel` with `{time}`) — and turns Send off while the field stays editable. The wait is kept on `performance.now()` and survives "New chat". See [PROTOCOL.md § Request limits](../docs/PROTOCOL.md#request-limits).
 
 ### Connection Handling
 
@@ -194,6 +206,7 @@ The store listens for these events from the hub:
 | `typing` | Sets `isTyping = true` | Agent started processing |
 | `stream` | Updates/pushes message | Accumulated text + parts (replace, not append) |
 | `stream_end` | Finalizes message | Streaming complete, `streaming = false` |
+| `agent_limit` | Starts or ends the wait | An hour or day request limit of the agent is full, or room was made early |
 | `connect` | Sets `isConnected = true` | Socket connected |
 | `disconnect` | Sets `isConnected = false` | Socket disconnected |
 | `connect_error` | Logs error | Auth failure or network error |
@@ -202,7 +215,7 @@ The store emits:
 
 | Event | Payload | When |
 |-------|---------|------|
-| `message` | `{ text, parts }` | User sends a message |
+| `message` | `{ text, parts, clientMessageId }` + acknowledgement callback | User sends a message |
 | `ping` | `{}` | Keepalive (manual) |
 
 ## File Structure

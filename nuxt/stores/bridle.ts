@@ -69,6 +69,49 @@ export interface IBridleConnectionError {
   details?: Record<string, unknown>
 }
 
+// ── Request limits ────────────────────────────────────────────
+// A hub may cap how many requests an agent takes per minute, hour and day.
+// A full window is a state to wait out, not an error: it arrives in the
+// acknowledgement of a send and in the `agent_limit` event, never in
+// `bridle_error`. See docs/PROTOCOL.md § Request limits.
+
+/** The window that set the wait. */
+export type BridleLimitWindow = 'minute' | 'hour' | 'day'
+
+/** What the hub answers to a `message` that carried a `clientMessageId`. */
+export type BridleSendAck =
+  | { status: 'accepted'; messageId: string; ts?: number; duplicate?: boolean }
+  | {
+      status: 'rejected'
+      code: string
+      message?: string
+      /** `RATE_LIMITED` only. */
+      retryAfterMs?: number
+      /** `RATE_LIMITED` only. */
+      window?: BridleLimitWindow
+    }
+
+/** A message the hub refused because the limit is full, for the composer to take back. */
+export interface IBridleReturnedDraft {
+  id: string
+  text: string
+}
+
+/**
+ * What the hub sends, as a `message`, to a visitor whose agent is not
+ * connected — unless the client asked for an acknowledgement, in which case
+ * it gets `AGENT_OFFLINE` there and says the line itself.
+ */
+const AGENT_OFFLINE_TEXT = 'Agent is not connected. Please try again later.'
+
+/**
+ * A clock that only moves forward and keeps moving in a background tab, so a
+ * wrong wall clock cannot shorten or stretch a wait.
+ */
+function monotonicNow(): number {
+  return typeof performance !== 'undefined' ? performance.now() : Date.now()
+}
+
 function buildParts(text: string, images?: Array<{ base64: string; mediaType: string }>): BridlePart[] {
   const parts: BridlePart[] = []
   if (text) parts.push({ type: BridlePartTypes.Text, text })
@@ -120,16 +163,41 @@ export const useBridleStore = defineStore('bridle', {
     /** A turn is running: `typing` was raised and nothing has closed it yet. */
     _turnOpen: false,
     _socket: null as Socket | null,
+    /**
+     * When the agent's request limit opens again, on the `performance.now()`
+     * clock. Null while sending is open.
+     */
+    limitUntil: null as number | null,
+    limitWindow: null as BridleLimitWindow | null,
+    /** What is left of the wait, refreshed once a second for the notice. */
+    limitRemainingMs: 0,
+    /** The last message the hub refused for the limit; the composer takes its text back. */
+    returnedDraft: null as IBridleReturnedDraft | null,
+    _limitTimer: null as ReturnType<typeof setTimeout> | null,
+    /** The agent the wait above belongs to. */
+    _limitAgentId: null as string | null,
   }),
 
   getters: {
     getMessages: (state) => state.messages,
     getIsOpen: (state) => state.isOpen,
+    /** The agent's request limit is full: nothing can be sent until it opens. */
+    isLimited: (state) => state.limitUntil !== null,
   },
 
   actions: {
     connect(apiUrl: string, agentId: string, token: string) {
       if (this._socket) return
+
+      // The store is one per app. A wait held for another agent does not
+      // apply to this one; a wait for the same agent picks its countdown up.
+      if (this._limitAgentId !== agentId) {
+        this.endLimit()
+        this.returnedDraft = null
+        this._limitAgentId = agentId
+      } else {
+        this.tickLimit()
+      }
 
       const socket = io(`${apiUrl}/ws/client`, {
         transports: ['websocket'],
@@ -198,6 +266,18 @@ export const useBridleStore = defineStore('bridle', {
         this._turnOpen = true
       })
 
+      // An hour or day window of the agent is full, or room was made before
+      // the announced time. Sent right after `welcome` and whenever it
+      // changes, so the wait is known before anything is typed.
+      socket.on('agent_limit', (data: { agentId?: string; limited?: boolean; retryAfterMs?: number; window?: BridleLimitWindow }) => {
+        if (!data || (data.agentId && data.agentId !== agentId)) return
+        if (data.limited === true && typeof data.retryAfterMs === 'number' && data.retryAfterMs > 0) {
+          this.startLimit(data.retryAfterMs, data.window ?? null)
+        } else if (data.limited === false) {
+          this.endLimit()
+        }
+      })
+
       socket.on('stream', (data: { text?: string; parts?: BridlePart[]; messageId?: string; ts?: number }) => {
         this.isTyping = false
         const text = data.text ?? ''
@@ -248,6 +328,51 @@ export const useBridleStore = defineStore('bridle', {
       this._socket = null
       this.isConnected = false
       this.connectionError = null
+      // The wait is the agent's, not the connection's: "New chat" reconnects
+      // and must find it still standing. Only the ticking stops here, so no
+      // timer outlives the component; `connect()` starts it again.
+      if (this._limitTimer) {
+        clearTimeout(this._limitTimer)
+        this._limitTimer = null
+      }
+    },
+
+    /** Hold sending for `retryAfterMs`. The latest word from the hub wins. */
+    startLimit(retryAfterMs: number, window: BridleLimitWindow | null) {
+      this.limitUntil = monotonicNow() + retryAfterMs
+      this.limitWindow = window
+      this.tickLimit()
+    },
+
+    /**
+     * Re-read the deadline: refresh the remaining wait, or open sending when
+     * it has passed. Runs once a second while limited; call it as well when
+     * the tab becomes visible, since background timers are throttled.
+     */
+    tickLimit() {
+      if (this._limitTimer) {
+        clearTimeout(this._limitTimer)
+        this._limitTimer = null
+      }
+      if (this.limitUntil === null) return
+      const left = this.limitUntil - monotonicNow()
+      if (left <= 0) {
+        this.endLimit()
+        return
+      }
+      this.limitRemainingMs = left
+      this._limitTimer = setTimeout(() => this.tickLimit(), left % 1000 || 1000)
+    },
+
+    /** Sending is open again — by time, or because the hub made room early. */
+    endLimit() {
+      if (this._limitTimer) {
+        clearTimeout(this._limitTimer)
+        this._limitTimer = null
+      }
+      this.limitUntil = null
+      this.limitWindow = null
+      this.limitRemainingMs = 0
     },
 
     /** Append one note to this turn's work log, opening the log if needed. */
@@ -290,17 +415,35 @@ export const useBridleStore = defineStore('bridle', {
       this._turnOpen = false
     },
 
-    sendMessage(text: string, images?: Array<{ base64: string; mediaType: string }>) {
-      if (!text.trim()) return
+    /**
+     * Send one message. Returns false, and sends nothing, while the agent's
+     * request limit is full.
+     *
+     * The bubble is drawn at once and the hub is asked to acknowledge the
+     * message. If it answers `RATE_LIMITED` the bubble is taken back, the
+     * typing dots stop, the wait starts and the text is offered to the
+     * composer through `returnedDraft`. A hub that does not acknowledge never
+     * calls back, and the message stands as it always did.
+     */
+    sendMessage(text: string, images?: Array<{ base64: string; mediaType: string }>): boolean {
+      if (!text.trim()) return false
+      if (this.limitUntil !== null) {
+        this.tickLimit()
+        if (this.limitUntil !== null) return false
+      }
 
       // The previous turn is over the moment the visitor speaks again,
       // whatever the runtime did or failed to do with it.
       this.settleLog()
 
       const parts = buildParts(text.trim(), images)
+      // The bubble's id travels as `clientMessageId`; the hub keeps it as the
+      // message id end to end.
+      const id = crypto.randomUUID()
+      const wasTyping = this.isTyping
 
       this.messages.push({
-        id: crypto.randomUUID(),
+        id,
         role: 'user',
         text: text.trim(),
         parts,
@@ -309,7 +452,33 @@ export const useBridleStore = defineStore('bridle', {
 
       this.isTyping = true
 
-      this._socket?.emit('message', { text: text.trim(), parts })
+      this._socket?.emit(
+        'message',
+        { text: text.trim(), parts, clientMessageId: id },
+        (ack: BridleSendAck | undefined) => {
+          if (!ack || ack.status !== 'rejected') return
+          if (ack.code === 'RATE_LIMITED') {
+            this.messages = this.messages.filter(m => m.id !== id)
+            this.isTyping = wasTyping
+            this.startLimit(ack.retryAfterMs && ack.retryAfterMs > 0 ? ack.retryAfterMs : 1000, ack.window ?? null)
+            this.returnedDraft = { id, text: text.trim() }
+            return
+          }
+          // Not delivered for another reason: the agent is not working on it.
+          this.isTyping = wasTyping
+          if (ack.code === 'AGENT_OFFLINE') {
+            const line = ack.message ?? AGENT_OFFLINE_TEXT
+            this.messages.push({
+              id: crypto.randomUUID(),
+              role: 'assistant',
+              text: line,
+              parts: [{ type: BridlePartTypes.Text, text: line }],
+              ts: Date.now(),
+            })
+          }
+        },
+      )
+      return true
     },
 
     clearMessages() {

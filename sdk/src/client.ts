@@ -1,9 +1,30 @@
 import { io, type Socket } from 'socket.io-client'
 import { TokenSource, type IGetTokenOptions, type TokenProvider } from './token'
-import type { BridleMessageKind, BridlePart, IBridleMessage } from './types'
+import type {
+  BridleLimitWindow,
+  BridleMessageKind,
+  BridlePart,
+  BridleSendOutcome,
+  IBridleLimitState,
+  IBridleMessage,
+  IBridleSendOptions,
+} from './types'
 
 /** Everything the embed widget knows how to render. */
 export const DEFAULT_CAPABILITIES = ['streaming', 'images', 'files', 'ui']
+
+/**
+ * What the hub used to send, as a `message`, to a visitor whose agent is not
+ * connected. A client that passes a `clientMessageId` gets `AGENT_OFFLINE` in
+ * the acknowledgement instead, so the client says the line itself.
+ */
+export const AGENT_OFFLINE_TEXT = 'Agent is not connected. Please try again later.'
+
+/**
+ * How long `send()` waits for the hub's acknowledgement before settling as
+ * `unacknowledged`. A hub that does not acknowledge never answers at all.
+ */
+const ACK_TIMEOUT_MS = 10_000
 
 export interface IBridleClientOptions {
   apiUrl: string
@@ -49,7 +70,16 @@ export interface IBridleClientOptions {
   capabilities?: string[]
 }
 
-type EventName = 'open' | 'close' | 'error' | 'typing' | 'message' | 'stream' | 'stream_end' | 'welcome'
+type EventName =
+  | 'open'
+  | 'close'
+  | 'error'
+  | 'typing'
+  | 'message'
+  | 'stream'
+  | 'stream_end'
+  | 'welcome'
+  | 'limit'
 type Listener<T = unknown> = (payload: T) => void
 
 /**
@@ -109,6 +139,14 @@ export class BridleClient {
   private lastForcedRefreshAt = Number.NEGATIVE_INFINITY
   /** Renewal to reconnect with once the hub has dropped the rejected socket. */
   private pendingReconnect: Promise<string> | null = null
+  /**
+   * When the agent's request limit opens again, on the `performance.now()`
+   * clock: a wrong wall clock or a throttled background tab cannot move it.
+   * Null while sending is open.
+   */
+  private limitUntil: number | null = null
+  private limitWindow: BridleLimitWindow | undefined
+  private limitTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(private opts: IBridleClientOptions) {
     if (opts.getToken) {
@@ -256,15 +294,73 @@ export class BridleClient {
     socket.on('stream_end', (data: unknown) =>
       this.fire('stream_end', toMessage(data, 'assistant', false)),
     )
+    // An hour or day window of the agent is full, or room was made before the
+    // announced time. Sent right after `welcome` and whenever it changes, so
+    // the wait is known before the visitor writes anything. An expected state:
+    // it goes to `limit`, never to `error`.
+    socket.on('agent_limit', (data: Record<string, unknown> | undefined) => {
+      if (!data) return
+      if (typeof data.agentId === 'string' && data.agentId !== this.opts.agentId) return
+      if (data.limited === true) {
+        const retryAfterMs = toWait(data.retryAfterMs)
+        if (retryAfterMs === null) return
+        this.fire('limit', this.startLimit(retryAfterMs, toWindow(data.window)))
+      } else if (data.limited === false) {
+        this.endLimit()
+      }
+    })
 
     this.socket = socket
   }
 
-  send(text: string, parts?: BridlePart[]): void {
+  /**
+   * Send one message. Every send carries a `clientMessageId` and asks the hub
+   * to acknowledge it; the returned promise resolves with that answer and
+   * never rejects, so a caller that ignores it behaves as before.
+   *
+   * - `RATE_LIMITED`: the agent's request limit is full. `limit` fires with
+   *   the wait, and until it is over further calls send nothing — `limit`
+   *   fires again with what is left of it.
+   * - `AGENT_OFFLINE`: fires `message` with the "Agent is not connected" line
+   *   the hub sends to clients that do not ask for an acknowledgement.
+   * - `unacknowledged`: the hub did not answer within 10 s — it does not
+   *   acknowledge, and took the message as it always did.
+   */
+  send(text: string, parts?: BridlePart[], options?: IBridleSendOptions): Promise<BridleSendOutcome> {
     if (!this.socket) throw new Error('[bridle] client not connected — call connect() first')
+    const limit = this.getLimit()
+    if (limit.limited) {
+      this.fire('limit', limit)
+      return Promise.resolve({ status: 'rejected', code: 'RATE_LIMITED', ...withoutFlag(limit) })
+    }
     const trimmed = text.trim()
     const resolvedParts = parts ?? (trimmed ? [{ type: 'text' as const, text: trimmed }] : [])
-    this.socket.emit('message', { text: trimmed, parts: resolvedParts })
+    const clientMessageId = options?.clientMessageId || randomId()
+    const socket = this.socket
+    return new Promise((resolve) => {
+      const timer = setTimeout(
+        () => resolve({ status: 'unacknowledged', messageId: clientMessageId }),
+        ACK_TIMEOUT_MS,
+      )
+      socket.emit('message', { text: trimmed, parts: resolvedParts, clientMessageId }, (ack: unknown) => {
+        clearTimeout(timer)
+        // An answer that arrives after the timeout still sets the limit and
+        // says the offline line; only the promise has already settled.
+        resolve(this.readAck(clientMessageId, ack))
+      })
+    })
+  }
+
+  /** Whether the agent's request limit is full right now, and for how long. */
+  getLimit(): IBridleLimitState {
+    if (this.limitUntil === null) return { limited: false }
+    const retryAfterMs = Math.ceil(this.limitUntil - monotonicNow())
+    if (retryAfterMs <= 0) return { limited: false }
+    return {
+      limited: true,
+      retryAfterMs,
+      ...(this.limitWindow ? { window: this.limitWindow } : {}),
+    }
   }
 
   disconnect(): void {
@@ -272,12 +368,17 @@ export class BridleClient {
     this.socket?.disconnect()
     this.socket = null
     this.ownTokenSource?.dispose()
+    if (this.limitTimer) {
+      clearTimeout(this.limitTimer)
+      this.limitTimer = null
+    }
   }
 
   on(event: 'open' | 'close' | 'typing', handler: () => void): void
   on(event: 'error', handler: (error: Error) => void): void
   on(event: 'welcome', handler: (data: { clientId: string }) => void): void
   on(event: 'message' | 'stream' | 'stream_end', handler: (message: IBridleMessage) => void): void
+  on(event: 'limit', handler: (state: IBridleLimitState) => void): void
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   on(event: EventName, handler: (...args: any[]) => void): void {
     if (!this.listeners.has(event)) this.listeners.set(event, new Set())
@@ -309,6 +410,66 @@ export class BridleClient {
     return renewal
   }
 
+  /** Turn the hub's acknowledgement into an outcome, with its side effects. */
+  private readAck(clientMessageId: string, ack: unknown): BridleSendOutcome {
+    const a = (ack ?? {}) as Record<string, unknown>
+    if (a.status === 'accepted') {
+      return {
+        status: 'accepted',
+        messageId: typeof a.messageId === 'string' ? a.messageId : clientMessageId,
+        ...(typeof a.ts === 'number' ? { ts: a.ts } : {}),
+        ...(a.duplicate === true ? { duplicate: true } : {}),
+      }
+    }
+    if (a.status !== 'rejected') return { status: 'unacknowledged', messageId: clientMessageId }
+
+    const code = typeof a.code === 'string' ? a.code : 'UNKNOWN'
+    const message = typeof a.message === 'string' ? a.message : undefined
+    if (code === 'RATE_LIMITED') {
+      // The contract says the wait is always positive; a hub that breaks it
+      // still must not leave the visitor with a notice that never ends.
+      const state = this.startLimit(toWait(a.retryAfterMs) ?? 1_000, toWindow(a.window))
+      this.fire('limit', state)
+      return { status: 'rejected', code, ...withoutFlag(state) }
+    }
+    if (code === 'AGENT_OFFLINE') {
+      const text = message ?? AGENT_OFFLINE_TEXT
+      this.fire('message', toMessage({ text }, 'assistant'))
+    }
+    return { status: 'rejected', code, ...(message ? { message } : {}) }
+  }
+
+  /** Hold sending for `retryAfterMs`. The latest word from the hub wins. */
+  private startLimit(retryAfterMs: number, window: BridleLimitWindow | undefined): IBridleLimitState {
+    this.limitUntil = monotonicNow() + retryAfterMs
+    this.limitWindow = window
+    this.armLimitTimer(retryAfterMs)
+    return { limited: true, retryAfterMs, ...(window ? { window } : {}) }
+  }
+
+  private armLimitTimer(delayMs: number): void {
+    if (this.limitTimer) clearTimeout(this.limitTimer)
+    this.limitTimer = setTimeout(() => {
+      this.limitTimer = null
+      if (this.limitUntil === null) return
+      // A timer can fire early against the monotonic clock; wait out the rest.
+      const left = this.limitUntil - monotonicNow()
+      if (left > 0) this.armLimitTimer(left)
+      else this.endLimit()
+    }, delayMs)
+  }
+
+  /** Sending is open again: by time, or because the hub made room early. */
+  private endLimit(): void {
+    if (this.limitTimer) {
+      clearTimeout(this.limitTimer)
+      this.limitTimer = null
+    }
+    this.limitUntil = null
+    this.limitWindow = undefined
+    this.fire('limit', { limited: false })
+  }
+
   private fire<T>(event: EventName, payload: T): void {
     this.listeners.get(event)?.forEach((fn) => {
       try {
@@ -327,6 +488,30 @@ export function isTokenRejection(code: string | undefined): boolean {
 
 function toError(err: unknown): Error {
   return err instanceof Error ? err : new Error(String(err))
+}
+
+/**
+ * A clock that only moves forward and keeps moving in a background tab. Waits
+ * are measured on it, so changing the system time cannot shorten or stretch one.
+ */
+export function monotonicNow(): number {
+  const p = (globalThis as unknown as { performance?: { now?: () => number } }).performance
+  return typeof p?.now === 'function' ? p.now() : Date.now()
+}
+
+function toWait(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null
+}
+
+function toWindow(value: unknown): BridleLimitWindow | undefined {
+  return value === 'minute' || value === 'hour' || value === 'day' ? value : undefined
+}
+
+function withoutFlag(state: IBridleLimitState): { retryAfterMs?: number; window?: BridleLimitWindow } {
+  return {
+    ...(state.retryAfterMs !== undefined ? { retryAfterMs: state.retryAfterMs } : {}),
+    ...(state.window ? { window: state.window } : {}),
+  }
 }
 
 function toMessage(

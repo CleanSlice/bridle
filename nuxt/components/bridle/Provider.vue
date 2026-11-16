@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, nextTick, watch, onMounted, onUnmounted, type HTMLAttributes } from 'vue'
+import { ref, computed, nextTick, watch, onMounted, onUnmounted, type HTMLAttributes } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useBridleStore } from '../../stores/bridle'
 import Message from './Message.vue'
@@ -8,7 +8,7 @@ import Thinking from './Thinking.vue'
 import { Card, CardContent, CardFooter, CardHeader } from '#theme/components/ui/card'
 import { ScrollArea } from '#theme/components/ui/scroll-area'
 import { Button } from '#theme/components/ui/button'
-import { Bot, Circle, Loader2, MessageSquarePlus } from 'lucide-vue-next'
+import { Bot, Circle, Clock, Loader2, MessageSquarePlus } from 'lucide-vue-next'
 import { cn } from '#theme/utils/cn'
 
 const props = withDefaults(defineProps<{
@@ -27,6 +27,13 @@ const props = withDefaults(defineProps<{
    * reasoning for a turn. Default: "Work log".
    */
   thinkingLabel?: string
+  /** First line of the notice shown while the agent's request limit is full. */
+  limitLabel?: string
+  /**
+   * Second line of that notice; `{time}` becomes the countdown, or the time
+   * of day for a wait of an hour or more.
+   */
+  limitRetryLabel?: string
 }>(), {
   title: 'Agent Chat',
   placeholder: 'Type a message...',
@@ -34,12 +41,50 @@ const props = withDefaults(defineProps<{
   channel: 'admin',
   showNewChatButton: true,
   thinkingLabel: 'Work log',
+  limitLabel: 'This agent has reached its message limit.',
+  limitRetryLabel: 'Try again in {time}.',
   resetConfirmText:
     'Delete the saved transcript and start fresh? Past messages will be removed from storage. The agent\'s in-memory context may persist until its next restart.',
 })
 
 const store = useBridleStore()
-const { messages, isConnected, isTyping, connectionError } = storeToRefs(store)
+const { messages, isConnected, isTyping, connectionError, isLimited, limitRemainingMs, returnedDraft } = storeToRefs(store)
+
+// ── Request limit ─────────────────────────────────────────────
+// The agent's request limit is full: a line above the composer says when to
+// try again, Send is off, the field stays editable. The store holds the
+// deadline; this only words it. Under an hour it is a running `m:ss`, from an
+// hour up the local time of day.
+const LIMIT_NOTICE_ID = 'bridle-limit-notice'
+const HOUR_MS = 60 * 60 * 1000
+
+const limitRetryText = computed(() => {
+  const left = limitRemainingMs.value
+  let time: string
+  if (left < HOUR_MS) {
+    const seconds = Math.max(0, Math.ceil(left / 1000))
+    time = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+  } else {
+    time = new Date(Date.now() + left).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  }
+  return props.limitRetryLabel.replace('{time}', time)
+})
+
+const inputRef = ref<InstanceType<typeof Input> | null>(null)
+
+// A message the hub refused for the limit comes back to the composer: the
+// store has already taken its bubble out of the conversation.
+watch(returnedDraft, (draft) => {
+  if (!draft) return
+  inputRef.value?.restore(draft.text)
+  store.returnedDraft = null
+})
+
+// Background tabs throttle timers; the moment the tab is looked at again the
+// remaining wait is read off the deadline.
+function onVisibilityChange() {
+  if (document.visibilityState !== 'hidden') store.tickLimit()
+}
 
 // What the error banner actually renders. The hub often rejects the very
 // first handshake (auth token lags a beat behind mount), then the automatic
@@ -84,9 +129,11 @@ onMounted(async () => {
   store.clearMessages()
   await store.loadTranscript(props.apiUrl, props.agentId, props.token, props.channel)
   store.connect(props.apiUrl, props.agentId, props.token)
+  document.addEventListener('visibilitychange', onVisibilityChange)
 })
 
 onUnmounted(() => {
+  document.removeEventListener('visibilitychange', onVisibilityChange)
   if (errorSettleTimer) {
     clearTimeout(errorSettleTimer)
     errorSettleTimer = null
@@ -214,10 +261,28 @@ async function onNewChat() {
       </ScrollArea>
     </CardContent>
 
+    <!-- Information, not an error: muted colours, never the red of the banner.
+         The ticking time is hidden from the live region so it is read once. -->
+    <div
+      v-if="isLimited"
+      :id="LIMIT_NOTICE_ID"
+      role="status"
+      class="flex items-start gap-2 border-t bg-muted px-4 py-2 text-xs leading-relaxed text-muted-foreground"
+    >
+      <Clock class="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+      <span>
+        {{ limitLabel }}
+        <span class="font-semibold tabular-nums text-foreground" aria-live="off">{{ limitRetryText }}</span>
+      </span>
+    </div>
+
     <CardFooter class="border-t p-3">
       <Input
+        ref="inputRef"
         :placeholder="placeholder"
         :disabled="!isConnected"
+        :send-disabled="isLimited"
+        :described-by="LIMIT_NOTICE_ID"
         @send="handleSend"
       />
     </CardFooter>

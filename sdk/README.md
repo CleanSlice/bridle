@@ -29,6 +29,8 @@ The script auto-mounts a floating chat bubble in the bottom-right corner. If the
 | `data-accept` | `image/*` | File types the attachment picker offers |
 | `data-upload-url` | optional | Endpoint that stores a non-image attachment and answers with its URL |
 | `data-enable-images` | `true` | Pictures in the conversation, both directions. `false` turns them off |
+| `data-limit-label` | `This agent has reached its message limit.` | First line of the [request-limit notice](#request-limits) |
+| `data-limit-retry-label` | `Try again in {time}.` | Second line; `{time}` is the countdown or the time of day |
 | `data-custom-css` | optional | Inline CSS injected into the shadow root |
 | `data-stylesheet` | optional | Stylesheet URL(s) loaded into the shadow root (comma-separate for multiple) |
 
@@ -48,6 +50,7 @@ const chat = init({
   onReady: () => {},
   onMessage: (msg) => console.log(msg.text),
   onError: (err) => console.error(err),
+  onLimit: ({ limited, retryAfterMs }) => {},  // the agent's request limit filled / opened
 })
 
 chat.sendMessage('Hi!')
@@ -82,6 +85,46 @@ With a static string token the widget cannot renew: it fires `onTokenExpired`
 Don't work around expiry with a long `expiresIn` — a long-lived browser JWT
 still expires, and leaks for longer. Full guide:
 [bridle.cleanslice.org/embed/npm#token-refresh](https://bridle.cleanslice.org/embed/npm#token-refresh).
+
+## Request limits
+
+A hub can cap how many requests an agent takes per minute, hour and day. When
+a limit is full the widget shows a calm notice on top of the message field
+instead of an error:
+
+```
+This agent has reached its message limit.
+Try again in 0:42.
+```
+
+The refused message does not stay in the conversation and no typing dots
+start; its text and attachments are back in the message field. The visitor can
+keep typing, Send is unavailable until the countdown ends, and nothing is sent
+automatically when it does. A wait of an hour or more reads "Try again after
+14:30." instead of a running clock.
+
+```js
+init({
+  /* … */
+  limitLabel: 'Our assistant is busy right now.',   // line 1
+  limitRetryLabel: 'Please try again in {time}.',   // line 2, {time} → 0:42
+  onLimit: ({ limited, retryAfterMs, window }) => {
+    // limited: true  — a send was refused, the hub announced a full limit,
+    //                  or sendMessage() was tried during the wait
+    // limited: false — the wait is over
+  },
+})
+```
+
+Script tag: `data-limit-label`, `data-limit-retry-label`; the element
+dispatches a `limit` event whose `detail[0]` is the same state. While limited,
+`chat.sendMessage()` and headless `client.send()` send nothing and report the
+remaining wait through `limit` again. A full limit never reaches `onError`.
+
+Headless: `client.on('limit', (state) => …)`, `client.getLimit()`, and
+`client.send()` now returns a promise of the hub's answer
+(`accepted` / `rejected` with a `code` / `unacknowledged`) that never rejects.
+Wire format: [PROTOCOL.md § Request limits](../docs/PROTOCOL.md#request-limits).
 
 ## Work log (agent reasoning)
 

@@ -3,7 +3,12 @@ import { defineCustomElement } from 'vue'
 // @ts-ignore — Vite resolves .ce.vue, tsc dts pass doesn't know about it
 import BridleChat from './BridleChat.ce.vue'
 import { BridleClient, BridleAuthError } from './client'
-import type { IBridleInitOptions, IBridleInstance, IBridleMessage } from './types'
+import type {
+  IBridleInitOptions,
+  IBridleInstance,
+  IBridleLimitState,
+  IBridleMessage,
+} from './types'
 
 // Capture the script tag synchronously at module load — `document.currentScript`
 // is null after the IIFE finishes, so we can't read it lazily for auto-mount or
@@ -139,6 +144,8 @@ function init(opts: IBridleInitOptions): IBridleInstance {
   if (opts.sessionExpiredLabel) el.setAttribute('session-expired-label', opts.sessionExpiredLabel)
   if (opts.reconnectLabel) el.setAttribute('reconnect-label', opts.reconnectLabel)
   if (opts.reloadLabel) el.setAttribute('reload-label', opts.reloadLabel)
+  if (opts.limitLabel) el.setAttribute('limit-label', opts.limitLabel)
+  if (opts.limitRetryLabel) el.setAttribute('limit-retry-label', opts.limitRetryLabel)
 
   // A static token goes into the observable `token` attribute; setting it
   // again later (`setToken`) reconnects with the new one. A function is kept
@@ -184,6 +191,14 @@ function init(opts: IBridleInitOptions): IBridleInstance {
     )
   }
   if (opts.onTokenExpired) el.addEventListener('token-expired', () => opts.onTokenExpired?.())
+  if (opts.onLimit) {
+    el.addEventListener('limit', (e) => {
+      // Vue hands a custom element's emit arguments over as an array in
+      // `detail`; the callback gets the state itself.
+      const detail = (e as CustomEvent<IBridleLimitState | [IBridleLimitState]>).detail
+      opts.onLimit?.(Array.isArray(detail) ? detail[0] : detail)
+    })
+  }
 
   return {
     element: el,
@@ -249,6 +264,8 @@ function autoMount(): void {
     sessionExpiredLabel: ds.sessionExpiredLabel,
     reconnectLabel: ds.reconnectLabel,
     reloadLabel: ds.reloadLabel,
+    limitLabel: ds.limitLabel,
+    limitRetryLabel: ds.limitRetryLabel,
     suggestions: ds.suggestions ? parseSuggestionsAttr(ds.suggestions) : undefined,
     customCss: ds.customCss,
     stylesheets,
@@ -280,7 +297,12 @@ if (typeof window !== 'undefined') {
 export { init, BridleClient, BridleAuthError }
 export type {
   BridlePart,
+  BridleLimitWindow,
+  BridleSendAck,
+  BridleSendOutcome,
+  IBridleLimitState,
   IBridleMessage,
   IBridleInitOptions,
   IBridleInstance,
+  IBridleSendOptions,
 } from './types'

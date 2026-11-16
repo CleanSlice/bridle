@@ -131,6 +131,33 @@ Send a message to the agent. Prefer `parts` for rich content; `text` + `images` 
 | `text` | string | yes | Plain-text shorthand |
 | `parts` | BridlePart[] | no | Rich content (source of truth). If omitted, built from text + images. |
 | `images` | array | no | Legacy: attached images. Converted to parts if `parts` is absent. |
+| `clientMessageId` | string | no | Id minted by the browser, at most 100 characters. Opts the sender into the acknowledgement below; the hub keeps it as the message id end to end and ignores a repeat of it. The SDK sends one with every message since 0.16.0. |
+
+##### Acknowledgement
+
+A hub that supports it answers a `message` that carried a `clientMessageId`
+through the socket.io acknowledgement callback:
+
+```ts
+type BridleSendAck =
+  | { status: 'accepted'; messageId: string; ts: number; duplicate?: boolean }
+  | { status: 'rejected'; code: 'AGENT_OFFLINE' | 'ATTACHMENT_FAILED' | 'SHARE_REJECTED' | 'EMPTY'; message?: string }
+  | { status: 'rejected'; code: 'RATE_LIMITED'; retryAfterMs: number; window: 'minute' | 'hour' | 'day' }
+```
+
+- `accepted` — forwarded to the agent. `messageId` is the browser's own id;
+  `duplicate: true` means that id was already accepted and the agent was not
+  asked twice.
+- `rejected` — not forwarded. The message must not stay on screen as sent, and
+  no `typing` will follow.
+- A sender that passes a `clientMessageId` renders the outcome itself, so the
+  hub does **not** also send it the "Agent is not connected" `message` line
+  (see [Agent unavailable](#agent-unavailable)) or the limit fallback line
+  (see [Request limits](#request-limits)). A sender that passes none gets no
+  acknowledgement and keeps receiving those lines.
+- Acknowledging is optional for a hub. The reference hub in `nestjs/` does not:
+  the callback is never called, and the client treats the message as taken.
+  The SDK settles `client.send()` as `unacknowledged` after 10 s.
 
 #### `ping`
 
@@ -139,6 +166,50 @@ Keepalive check. Hub responds with `pong`.
 ```json
 {}
 ```
+
+### Request limits
+
+A hub may cap how many requests one agent takes per minute, per hour and per
+day. The allowance is the agent's and everyone who talks to it draws on it. A
+full window is an expected state with a known end — it is never reported
+through `bridle_error`, and a client must not treat it as a failure.
+
+It reaches the browser three ways:
+
+1. **The acknowledgement** of a send:
+   `{ status: 'rejected', code: 'RATE_LIMITED', retryAfterMs, window }`.
+   `retryAfterMs` is always greater than zero, and when several windows are
+   full it is the longest wait, so a countdown never ends in another refusal
+   caused by a window that was already full.
+2. **The [`agent_limit`](#agent_limit) event**, for an hour or day window, so a
+   chat that is only being read learns about the wait before anything is sent.
+3. **A plain `message` line**, for a sender that passed no `clientMessageId`
+   and so cannot be acknowledged (SDK ≤ 0.15.1). Shaped like the "Agent is not
+   connected" reply, English only, not stored by the agent:
+
+   ```text
+   This agent has reached its message limit. Try again in about 40 seconds.
+   This agent has reached its message limit. Try again in about 12 minutes.
+   This agent has reached its message limit. Try again in about 3 hours.
+   ```
+
+Order of checks for one message: share link → attachments → empty → duplicate
+(`accepted`, `duplicate: true`) → `AGENT_OFFLINE` → `RATE_LIMITED` →
+`accepted`.
+
+What a client does with it:
+
+- stores `until = performance.now() + retryAfterMs` — a monotonic clock, so a
+  wrong wall clock or a throttled background tab cannot distort the wait — and
+  derives what it shows from that, re-reading it on `visibilitychange`;
+- takes the refused message back out of the conversation and returns its text
+  and attachments to the composer;
+- sends nothing until the wait is over, by any path (button, Enter, suggestion,
+  form, queued messages), and sends nothing by itself when it ends: if every
+  waiting chat fired in the same second most would be refused again.
+
+The reference hub in `nestjs/` does not limit anything; only the types are
+there (`BridleSendAck`, `IBridleAgentLimitEvent`).
 
 ### Events: Hub -> Browser
 
@@ -222,6 +293,34 @@ Response to `ping`.
   "ts": 1712847600000
 }
 ```
+
+#### `agent_limit`
+
+An hour or day [request limit](#request-limits) of the agent is full and will
+stay so for a while, or room was made earlier than announced. Optional: sent
+only by a hub that limits requests.
+
+```json
+{ "type": "agent_limit", "agentId": "agent-abc-123", "limited": true, "retryAfterMs": 720000, "window": "hour" }
+```
+
+```json
+{ "type": "agent_limit", "agentId": "agent-abc-123", "limited": false }
+```
+
+Sent to **every** client socket of the agent, whatever its identity:
+
+| When | Payload |
+|------|---------|
+| A socket connects and an hour or day window is full | `limited: true`, right after `welcome` |
+| An accepted request fills an hour or day window | `limited: true` |
+| Limits are raised or removed and nothing is full any more | `limited: false` |
+| Limits are lowered or created and an hour or day window is now full | `limited: true` |
+
+Never sent for a full **minute** window — it clears within a minute, and
+announcing it to people who are only reading would make a notice flicker — and
+never sent when a window frees by time passing: the client counts down by
+itself. A client that does not know the event ignores it.
 
 ---
 
@@ -723,6 +822,51 @@ Browser              Hub
    |<-- message ------|
    |  { text: "Agent is not connected...",
    |    parts: [{ type: "text", text: "Agent is not connected..." }] }
+```
+
+A sender that passed a `clientMessageId` to a hub that acknowledges gets the
+same fact in the acknowledgement instead, and no `message`:
+
+```
+Browser              Hub
+   |                  |
+   |-- message ------>|  { text, parts, clientMessageId }
+   |                  |  (no agent for this agentId)
+   |<-- ack ----------|
+   |  { status: "rejected", code: "AGENT_OFFLINE" }
+```
+
+The SDK (≥ 0.16.0) then shows the "Agent is not connected. Please try again
+later." line itself, so the visitor sees what they always saw.
+
+### Request limit reached
+
+```
+Browser              Hub                 Agent
+   |                  |                    |
+   |-- message ------>|  { text, parts, clientMessageId }
+   |                  |  (the agent's minute window is full)
+   |<-- ack ----------|                    |  (nothing is forwarded)
+   |  { status: "rejected", code: "RATE_LIMITED",
+   |    retryAfterMs: 42000, window: "minute" }
+   |                  |
+   |  takes the bubble back, keeps the text in the composer,
+   |  shows "Try again in 0:42." and sends nothing for 42 s
+   |                  |
+   |-- message ------>|  (pressed by the person after the wait)
+   |<-- ack ----------|  { status: "accepted", messageId, ts }
+   |                  |-- message -------->|
+```
+
+When the request that was just accepted fills an hour or day window, every
+socket of the agent hears about it at once:
+
+```
+Browser A            Hub                 Browser B
+   |-- message ------>|                    |
+   |<-- ack accepted -|                    |
+   |<-- agent_limit --|-- agent_limit ---->|
+   |  { limited: true, retryAfterMs: 720000, window: "hour" }
 ```
 
 ### HTTP sync fallback

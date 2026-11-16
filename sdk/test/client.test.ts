@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { hub, flush, jwt, resetFakes, sockets, socketIoMock } from './fakeSocket'
+import { hub, flush, jwt, resetFakes, sockets, socketIoMock, TIMERS_WITH_PERFORMANCE } from './fakeSocket'
 
 vi.mock('socket.io-client', () => socketIoMock())
 
@@ -166,6 +166,142 @@ describe('BridleClient.authorizedFetch', () => {
     const res = await client.authorizedFetch('http://hub/x')
     expect(res.status).toBe(401)
     expect(calls).toEqual(['expired'])
+  })
+})
+
+/*
+ * The hub answers a `message` that carries a `clientMessageId` through the
+ * socket.io acknowledgement. A full request limit comes back that way too, and
+ * it is a state to wait out, not a failure: it must never reach `error`, which
+ * is what paints the red banner.
+ */
+describe('BridleClient send acknowledgement and limits', () => {
+  type LimitState = { limited: boolean; retryAfterMs?: number; window?: string }
+
+  async function connected() {
+    // The outer hook already installed fake timers, and a second install is a
+    // no-op until the first is undone.
+    vi.useRealTimers()
+    vi.useFakeTimers(TIMERS_WITH_PERFORMANCE)
+    vi.setSystemTime(NOW)
+    hub.check = () => null
+    const { client, log } = startClient({ apiUrl: 'http://hub', agentId: 'a' })
+    const limits: LimitState[] = []
+    const messages: string[] = []
+    client.on('limit', (state) => limits.push(state))
+    client.on('message', (m) => messages.push(m.text))
+    await client.connect()
+    await flush()
+    return { client, log, limits, messages, socket: sockets[0] }
+  }
+
+  const rateLimited = (retryAfterMs: number, window = 'minute') => () => ({
+    status: 'rejected',
+    code: 'RATE_LIMITED',
+    retryAfterMs,
+    window,
+  })
+
+  it('sends a clientMessageId and passes an acknowledgement callback', async () => {
+    const { client, socket } = await connected()
+    void client.send('hello')
+
+    expect(socket.sent).toEqual([
+      { text: 'hello', parts: [{ type: 'text', text: 'hello' }], clientMessageId: expect.any(String) },
+    ])
+    expect((socket.sent[0] as { clientMessageId: string }).clientMessageId.length).toBeGreaterThan(0)
+    expect(typeof socket.acks[0]).toBe('function')
+  })
+
+  it('uses the id the caller minted and resolves with the accepted outcome', async () => {
+    hub.ack = (payload) => ({ status: 'accepted', messageId: payload.clientMessageId, ts: 7 })
+    const { client, socket } = await connected()
+
+    const outcome = await client.send('hello', undefined, { clientMessageId: 'bubble-1' })
+    expect((socket.sent[0] as { clientMessageId: string }).clientMessageId).toBe('bubble-1')
+    expect(outcome).toEqual({ status: 'accepted', messageId: 'bubble-1', ts: 7 })
+  })
+
+  it('RATE_LIMITED fires limit, never error', async () => {
+    hub.ack = rateLimited(42_000)
+    const { client, log, limits } = await connected()
+
+    const outcome = await client.send('hello')
+    expect(outcome).toEqual({ status: 'rejected', code: 'RATE_LIMITED', retryAfterMs: 42_000, window: 'minute' })
+    expect(limits).toEqual([{ limited: true, retryAfterMs: 42_000, window: 'minute' }])
+    expect(log.errors).toEqual([])
+  })
+
+  it('while limited nothing is sent and limit fires again with the remaining wait', async () => {
+    hub.ack = rateLimited(42_000)
+    const { client, socket, limits } = await connected()
+    await client.send('first')
+
+    await vi.advanceTimersByTimeAsync(12_000)
+    const outcome = await client.send('second')
+
+    expect(socket.sent).toHaveLength(1)
+    expect(outcome).toEqual({ status: 'rejected', code: 'RATE_LIMITED', retryAfterMs: 30_000, window: 'minute' })
+    expect(limits.at(-1)).toEqual({ limited: true, retryAfterMs: 30_000, window: 'minute' })
+    expect(client.getLimit()).toEqual({ limited: true, retryAfterMs: 30_000, window: 'minute' })
+  })
+
+  it('reports the end of the wait once and sends again after it', async () => {
+    hub.ack = rateLimited(42_000)
+    const { client, socket, limits } = await connected()
+    await client.send('first')
+
+    await vi.advanceTimersByTimeAsync(42_000)
+    expect(limits.at(-1)).toEqual({ limited: false })
+    expect(limits.filter((l) => !l.limited)).toHaveLength(1)
+    expect(client.getLimit()).toEqual({ limited: false })
+
+    hub.ack = undefined
+    void client.send('second')
+    expect(socket.sent).toHaveLength(2)
+  })
+
+  it('listens to agent_limit: a full window blocks sending, an early release opens it', async () => {
+    const { client, socket, limits, log } = await connected()
+
+    socket.trigger('agent_limit', { type: 'agent_limit', agentId: 'a', limited: true, retryAfterMs: 600_000, window: 'hour' })
+    expect(limits).toEqual([{ limited: true, retryAfterMs: 600_000, window: 'hour' }])
+    await client.send('blocked')
+    expect(socket.sent).toEqual([])
+
+    socket.trigger('agent_limit', { type: 'agent_limit', agentId: 'a', limited: false })
+    expect(limits.at(-1)).toEqual({ limited: false })
+    void client.send('goes out')
+    expect(socket.sent).toHaveLength(1)
+    expect(log.errors).toEqual([])
+  })
+
+  it('ignores an agent_limit addressed to another agent', async () => {
+    const { socket, limits } = await connected()
+    socket.trigger('agent_limit', { type: 'agent_limit', agentId: 'other', limited: true, retryAfterMs: 600_000, window: 'hour' })
+    expect(limits).toEqual([])
+  })
+
+  it('AGENT_OFFLINE becomes the line the hub no longer sends to an acknowledging client', async () => {
+    hub.ack = () => ({ status: 'rejected', code: 'AGENT_OFFLINE' })
+    const { client, messages, log, limits } = await connected()
+
+    const outcome = await client.send('hello')
+    expect(outcome).toEqual({ status: 'rejected', code: 'AGENT_OFFLINE' })
+    expect(messages).toEqual(['Agent is not connected. Please try again later.'])
+    expect(log.errors).toEqual([])
+    expect(limits).toEqual([])
+  })
+
+  it('a hub that never acknowledges settles as unacknowledged, with nothing fired', async () => {
+    const { client, limits, messages, log } = await connected()
+    const pending = client.send('hello')
+    await vi.advanceTimersByTimeAsync(10_000)
+
+    expect(await pending).toEqual({ status: 'unacknowledged', messageId: expect.any(String) })
+    expect(limits).toEqual([])
+    expect(messages).toEqual([])
+    expect(log.errors).toEqual([])
   })
 })
 

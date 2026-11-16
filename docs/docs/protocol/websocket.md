@@ -23,15 +23,45 @@ The hub disconnects unauthorized clients in `handleConnection` before any events
 | `stream` | `{ text, parts, messageId, ts }` | Partial agent text (accumulated) |
 | `stream_end` | `{ text, parts, messageId, ts }` | Stream finished |
 | `typing` | `{}` | Agent is processing |
+| `agent_limit` | `{ agentId, limited: true, retryAfterMs, window: 'hour' \| 'day' }` or `{ agentId, limited: false }` | Optional. An hour or day [request limit](#request-limits) of the agent is full — right after `welcome`, or when it fills — or room was made early |
 
 ### Browser → Hub
 
 | Event | Payload | Effect |
 |-------|---------|--------|
-| `message` | `{ text, parts? }` | Forward to the agent for this `agentId` |
+| `message` | `{ text, parts?, clientMessageId? }` | Forward to the agent for this `agentId`. With a `clientMessageId` the hub may [acknowledge](#acknowledgement) |
 | `ping` | `{}` | Keepalive — hub responds with `pong { ts }` |
 
 The browser's `clientId` is derived from the JWT (`sub`, or `'admin'` for admins) — not sent on outgoing events.
+
+### Acknowledgement
+
+A `message` that carries a `clientMessageId` (the SDK sends one with every message since 0.16.0) can be answered through the socket.io acknowledgement callback:
+
+```ts
+type BridleSendAck =
+  | { status: 'accepted'; messageId: string; ts: number; duplicate?: boolean }
+  | { status: 'rejected'; code: 'AGENT_OFFLINE' | 'ATTACHMENT_FAILED' | 'SHARE_REJECTED' | 'EMPTY'; message?: string }
+  | { status: 'rejected'; code: 'RATE_LIMITED'; retryAfterMs: number; window: 'minute' | 'hour' | 'day' }
+```
+
+A rejected message was not forwarded. Because such a sender renders the outcome itself, the hub does not also send it the "Agent is not connected" line as a `message`; a sender without a `clientMessageId` gets no acknowledgement and keeps receiving that line.
+
+Acknowledging is optional. The reference hub does not: the callback is never called and the client treats the message as taken (`client.send()` settles as `unacknowledged` after 10 s).
+
+### Request limits
+
+A hub may cap the requests one agent takes per minute, hour and day. A full window is an expected state with a known end, never a `bridle_error`.
+
+| The sender | Learns it from |
+|------------|----------------|
+| Passed a `clientMessageId` | The acknowledgement: `{ status: 'rejected', code: 'RATE_LIMITED', retryAfterMs, window }` |
+| Is only reading, and an hour or day window is full | `agent_limit` |
+| Passed no `clientMessageId` (SDK ≤ 0.15.1) | A plain `message`: "This agent has reached its message limit. Try again in about 40 seconds." |
+
+`agent_limit` is never sent for a minute window, and never when a window frees by time passing — the client counts down by itself, on `performance.now()`, and sends nothing on its own when the wait ends. What the widget shows is described in [NPM › Request limits](/embed/npm#request-limits).
+
+The reference hub does not limit anything; it only carries the types.
 
 ## /ws/agent (agent runtime ↔ hub)
 

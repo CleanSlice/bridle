@@ -4,9 +4,16 @@ import { Textarea } from '#theme/components/ui/textarea'
 import { Button } from '#theme/components/ui/button'
 import { Send } from 'lucide-vue-next'
 
-defineProps<{
+const props = defineProps<{
   placeholder?: string
   disabled?: boolean
+  /**
+   * Sending is unavailable but typing is not — the agent's request limit is
+   * full. The field stays editable; Send and Enter do nothing until it opens.
+   */
+  sendDisabled?: boolean
+  /** Id of the element that says why Send is unavailable, for assistive tech. */
+  describedBy?: string
 }>()
 
 const emit = defineEmits<{
@@ -18,10 +25,23 @@ const textareaRef = ref<InstanceType<typeof Textarea> | null>(null)
 
 const handleSend = () => {
   if (!input.value.trim()) return
+  // Checked before the field is cleared: what was typed stays for the retry.
+  if (props.sendDisabled) return
   emit('send', input.value)
   input.value = ''
   textareaRef.value?.$el?.focus()
 }
+
+/**
+ * Put back a message the hub refused. Whatever was typed since stays, below
+ * the text that came back.
+ */
+const restore = (text: string) => {
+  input.value = input.value.trim() ? `${text}\n${input.value}` : text
+  textareaRef.value?.$el?.focus()
+}
+
+defineExpose({ restore })
 
 const handleKeydown = (e: KeyboardEvent) => {
   if (e.key === 'Enter' && !e.shiftKey) {
@@ -44,7 +64,8 @@ const handleKeydown = (e: KeyboardEvent) => {
     />
     <Button
       size="icon"
-      :disabled="!input.trim() || disabled"
+      :disabled="!input.trim() || disabled || sendDisabled"
+      :aria-describedby="sendDisabled ? describedBy : undefined"
       class="shrink-0"
       @click="handleSend"
     >

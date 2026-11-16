@@ -43,6 +43,8 @@ When the script loads, it auto-registers a `<bridle-chat>` Custom Element and mo
 | `data-session-expired-label` | `Your session has expired.` | Banner text when the hub no longer accepts the token and it could not be renewed |
 | `data-reconnect-label` | `Reconnect` | Banner button that gets a new token and reconnects |
 | `data-reload-label` | `Reload the page` | Banner button shown for a static token |
+| `data-limit-label` | `This agent has reached its message limit.` | First line of the notice shown above the message field while the agent's request limit is full. See [Request limits](/embed/npm#request-limits) |
+| `data-limit-retry-label` | `Try again in {time}.` | Second line of that notice. `{time}` is replaced by the countdown (`0:42`) or the time of day |
 
 ## Choosing where to load the script from
 
@@ -226,6 +228,21 @@ The script exposes a global object so you can also drive the widget from your ow
 ```
 
 When the script loads without `data-agent-id`, it skips the auto-mount and waits for `Bridle.init({...})` to be called manually.
+
+### Listening on an auto-mounted widget
+
+A widget mounted by `data-*` attributes has no `init()` call to pass callbacks to, but the element dispatches the same events. For example, the `limit` event fires when the agent's [request limit](/embed/npm#request-limits) fills up or opens again:
+
+```html
+<script>
+  customElements.whenDefined('bridle-chat').then(() => {
+    document.querySelector('bridle-chat').addEventListener('limit', (e) => {
+      const { limited, retryAfterMs, window: which } = e.detail[0]
+      console.log(limited ? `limit (${which}) — back in ${retryAfterMs} ms` : 'limit over')
+    })
+  })
+</script>
+```
 
 ## CSP
 

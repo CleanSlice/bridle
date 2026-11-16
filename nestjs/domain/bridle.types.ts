@@ -154,6 +154,61 @@ export interface IBridleOutgoingEvent {
   connected?: boolean
 }
 
+// ── Send acknowledgement and request limits ──────────────────
+// Types only: this reference hub neither acknowledges a `message` nor limits
+// anything. They describe what a hub that does both (Ranch) puts on the wire,
+// and what the SDK ≥ 0.16.0 understands. See docs/PROTOCOL.md § Request limits.
+
+/** The window that set a wait. */
+export type BridleLimitWindow = 'minute' | 'hour' | 'day'
+
+/**
+ * Hub → Browser, through the socket.io acknowledgement of a `message` that
+ * carried a `clientMessageId`. A sender that passed no id gets no
+ * acknowledgement and is answered the old way, with a `message` line.
+ */
+export type BridleSendAck =
+  | {
+      status: 'accepted'
+      /** The browser's own `clientMessageId`. */
+      messageId: string
+      /** Hub clock at acceptance. */
+      ts: number
+      /** A repeat of an id already accepted; the agent was not asked twice. */
+      duplicate?: boolean
+    }
+  | {
+      status: 'rejected'
+      code: 'AGENT_OFFLINE' | 'ATTACHMENT_FAILED' | 'SHARE_REJECTED' | 'EMPTY'
+      message?: string
+    }
+  | {
+      status: 'rejected'
+      /** A request limit of the agent is full. Expected, not a failure. */
+      code: 'RATE_LIMITED'
+      /** Milliseconds until a request will be accepted. Always > 0. */
+      retryAfterMs: number
+      /** The window that set the wait. */
+      window: BridleLimitWindow
+    }
+
+/**
+ * Hub → Browser `agent_limit`: an hour or day window of the agent is full, or
+ * room was made earlier than announced. Sent to every client socket of the
+ * agent — right after `welcome` when a window is already full, when one
+ * fills, and when limits change. Never sent for a minute window, and never
+ * when a window frees by time passing: the client counts down by itself.
+ */
+export type IBridleAgentLimitEvent =
+  | {
+      type: 'agent_limit'
+      agentId: string
+      limited: true
+      retryAfterMs: number
+      window: 'hour' | 'day'
+    }
+  | { type: 'agent_limit'; agentId: string; limited: false }
+
 // ── Admin: debug snapshots ───────────────────────────────────
 
 /**
