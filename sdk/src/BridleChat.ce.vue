@@ -6,13 +6,17 @@ import {
   BridleClient,
   BridleAuthError,
   isTokenRejection,
+  monotonicNow,
   DEFAULT_CAPABILITIES,
 } from './client'
 import { TokenSource } from './token'
 import type {
+  BridleLimitWindow,
   BridleMessageKind,
   BridlePart,
+  BridleSendOutcome,
   BridleUiValue,
+  IBridleLimitState,
   IBridleMessage,
   IBridleThinkingStep,
   IBridleUiPart,
@@ -46,6 +50,17 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024
 const DOWNSCALE_OVER = 800 * 1024
 const MAX_DIMENSION = 1280
 const JPEG_QUALITY = 0.85
+
+// The notice shown while the agent's request limit is full (CLEAN-224).
+const DEFAULT_LIMIT_LABEL = 'This agent has reached its message limit.'
+const DEFAULT_LIMIT_RETRY_LABEL = 'Try again in {time}.'
+const LIMIT_READY_TEXT = 'You can send your message now.'
+// How long the "you can send" line stays before the notice leaves.
+const LIMIT_READY_MS = 2000
+// How long the notice is emphasised after a send that went nowhere.
+const LIMIT_NUDGE_MS = 600
+const LIMIT_NOTICE_ID = 'bridle-limit-notice'
+const HOUR_MS = 60 * 60 * 1000
 
 // One-time DOMPurify hook: route agent-supplied links through a new tab so a
 // rogue href never navigates the host page out from under the embed.
@@ -177,6 +192,13 @@ const props = withDefaults(
     reconnectLabel?: string
     /** Banner button shown when the token is static and only a reload can get a new one. */
     reloadLabel?: string
+    /** First line of the notice shown while the agent's request limit is full. */
+    limitLabel?: string
+    /**
+     * Second line of that notice; `{time}` becomes the countdown, or the time
+     * of day for a wait of an hour or more. See types.ts.
+     */
+    limitRetryLabel?: string
   }>(),
   {
     title: 'Agent Chat',
@@ -191,6 +213,8 @@ const props = withDefaults(
     sessionExpiredLabel: 'Your session has expired.',
     reconnectLabel: 'Reconnect',
     reloadLabel: 'Reload the page',
+    limitLabel: DEFAULT_LIMIT_LABEL,
+    limitRetryLabel: DEFAULT_LIMIT_RETRY_LABEL,
   },
 )
 
@@ -206,6 +230,11 @@ const emit = defineEmits<{
    * `token` attribute; the widget then reconnects keeping the conversation.
    */
   'token-expired': []
+  /**
+   * The agent's request limit filled up (`limited: true` with the wait) or
+   * opened again (`limited: false`). A state, not an error: `error` stays quiet.
+   */
+  limit: [state: IBridleLimitState]
 }>()
 
 const messages = ref<IBridleMessage[]>([])
@@ -281,7 +310,7 @@ const canRenewToken = ref(tokens.renewable)
 // Messages the visitor sent while the socket was down (reconnecting after a
 // network drop or a token renewal). Shown at once, sent after the next
 // `welcome`, so nothing typed during a reconnect is lost.
-const outbox: { text: string; parts: BridlePart[] }[] = []
+const outbox: IPendingSend[] = []
 // Bumped on every connect() so welcome / transcript callbacks from a stale
 // socket can detect they're outdated and bail. Without this, "New chat"
 // would race: the old socket's welcome event arrives just after we clear
@@ -295,6 +324,203 @@ let connectGen = 0
 // a stable anonId would have the same problem; the only honest way to
 // break continuity from the client is to skip the next replay.
 let skipNextTranscript = false
+
+/**
+ * One message on its way to the hub, with what it takes to undo it. The
+ * bubble is drawn before the hub answers — a hub that does not acknowledge
+ * never would — so a refusal has to take the bubble back and return the text
+ * and attachments to the message field.
+ */
+interface IPendingSend {
+  /** Id of the bubble, and the `clientMessageId` on the wire. */
+  id: string
+  text: string
+  parts: BridlePart[]
+  /** Attachments that left the tray with this message. */
+  attachments: IBridleAttachment[]
+  /** Whether the typing indicator was already up for an earlier turn. */
+  wasTyping: boolean
+  /** Set for a UI-form submission: the form to reopen on refusal. */
+  uiId?: string
+}
+
+// ── Request limit (CLEAN-224) ─────────────────────────────────
+// The agent's request limit is full. Held here rather than only in the
+// client, because "New chat" builds a new client and the wait is the agent's,
+// not the conversation's. The deadline is on the `performance.now()` clock so
+// a wrong wall clock or a throttled background tab cannot distort it.
+const limitUntil = ref<number | null>(null)
+const limitWindow = ref<BridleLimitWindow | undefined>(undefined)
+/** The wait as announced, for the line that shrinks with it. */
+const limitTotalMs = ref(0)
+const limitRemainingMs = ref(0)
+/** The wait is over and the notice says so for a moment before leaving. */
+const limitReady = ref(false)
+const limitNudge = ref(false)
+/**
+ * What a screen reader hears: the two lines once when the notice appears and
+ * the "you can send" line once when it ends — never the seconds in between.
+ */
+const limitAnnouncement = ref('')
+let limitTickTimer: ReturnType<typeof setTimeout> | null = null
+let limitReadyTimer: ReturnType<typeof setTimeout> | null = null
+let limitNudgeTimer: ReturnType<typeof setTimeout> | null = null
+
+const isLimited = computed(() => limitUntil.value !== null)
+const showLimitNotice = computed(() => isLimited.value || limitReady.value)
+/** 1 → 0 as the wait runs out. */
+const limitFraction = computed(() =>
+  limitTotalMs.value > 0 ? Math.min(1, Math.max(0, limitRemainingMs.value / limitTotalMs.value)) : 0,
+)
+const limitRetryText = computed(() => formatLimitRetry(limitRemainingMs.value))
+
+/**
+ * The second line of the notice. Under an hour it is a running `m:ss`; from an
+ * hour up it is the time of day the limit reopens, which does not tick. The
+ * widget has no i18n module, so the clock time is formatted by the browser's
+ * own locale, and the "after" / "tomorrow after" wording exists in English
+ * only: a host that replaced `limitRetryLabel` gets the bare time in `{time}`.
+ */
+function formatLimitRetry(remainingMs: number): string {
+  const label = props.limitRetryLabel || DEFAULT_LIMIT_RETRY_LABEL
+  if (remainingMs < HOUR_MS) {
+    const seconds = Math.max(0, Math.ceil(remainingMs / 1000))
+    const time = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+    return label.replace('{time}', time)
+  }
+  const at = new Date(Date.now() + remainingMs)
+  const time = at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  const today = new Date()
+  const tomorrow =
+    at.getFullYear() !== today.getFullYear() ||
+    at.getMonth() !== today.getMonth() ||
+    at.getDate() !== today.getDate()
+  if (label === DEFAULT_LIMIT_RETRY_LABEL) {
+    return tomorrow ? `Try again tomorrow after ${time}.` : `Try again after ${time}.`
+  }
+  return label.replace('{time}', time)
+}
+
+function clearLimitTimer(which: 'tick' | 'ready' | 'nudge'): void {
+  if (which === 'tick' && limitTickTimer) {
+    clearTimeout(limitTickTimer)
+    limitTickTimer = null
+  } else if (which === 'ready' && limitReadyTimer) {
+    clearTimeout(limitReadyTimer)
+    limitReadyTimer = null
+  } else if (which === 'nudge' && limitNudgeTimer) {
+    clearTimeout(limitNudgeTimer)
+    limitNudgeTimer = null
+  }
+}
+
+/** The hub said the limit is full: hold sending and show the notice. */
+function startLimit(retryAfterMs: number, window: BridleLimitWindow | undefined): void {
+  const wasLimited = isLimited.value
+  clearLimitTimer('ready')
+  limitReady.value = false
+  limitUntil.value = monotonicNow() + retryAfterMs
+  limitWindow.value = window
+  limitTotalMs.value = retryAfterMs
+  limitRemainingMs.value = retryAfterMs
+  // A wait that only changed length is the same notice; saying it again
+  // would talk over whatever the person is doing.
+  if (!wasLimited) limitAnnouncement.value = `${props.limitLabel} ${limitRetryText.value}`
+  scheduleLimitTick()
+  emit('limit', { limited: true, retryAfterMs, ...(window ? { window } : {}) })
+}
+
+/** Re-read the deadline. Also called when the tab comes back to the front. */
+function tickLimit(): void {
+  if (limitUntil.value === null) return
+  const left = limitUntil.value - monotonicNow()
+  if (left <= 0) {
+    endLimit()
+    return
+  }
+  limitRemainingMs.value = left
+  scheduleLimitTick()
+}
+
+function scheduleLimitTick(): void {
+  clearLimitTimer('tick')
+  const left = limitRemainingMs.value
+  // A countdown changes on the second; a time of day only needs a look when
+  // the wait drops under the hour and turns into a countdown.
+  const delay = left >= HOUR_MS ? Math.min(left - HOUR_MS + 1, 60_000) : left % 1000 || 1000
+  limitTickTimer = setTimeout(() => {
+    limitTickTimer = null
+    tickLimit()
+  }, delay)
+}
+
+/**
+ * The wait is over — by time, or because the hub made room early. Sending is
+ * open at once; nothing is sent for the person, who presses Send themselves.
+ */
+function endLimit(): void {
+  if (!isLimited.value) return
+  clearLimitTimer('tick')
+  limitUntil.value = null
+  limitWindow.value = undefined
+  limitRemainingMs.value = 0
+  limitReady.value = true
+  limitAnnouncement.value = LIMIT_READY_TEXT
+  emit('limit', { limited: false })
+  clearLimitTimer('ready')
+  limitReadyTimer = setTimeout(() => {
+    limitReadyTimer = null
+    limitReady.value = false
+    limitAnnouncement.value = ''
+  }, LIMIT_READY_MS)
+}
+
+/** Forget the wait without ceremony: the widget now talks to another agent. */
+function resetLimit(): void {
+  clearLimitTimer('tick')
+  clearLimitTimer('ready')
+  clearLimitTimer('nudge')
+  limitUntil.value = null
+  limitWindow.value = undefined
+  limitRemainingMs.value = 0
+  limitReady.value = false
+  limitNudge.value = false
+  limitAnnouncement.value = ''
+}
+
+/** What is left of the wait, as the `limit` event carries it. */
+function currentLimit(): IBridleLimitState {
+  if (limitUntil.value === null) return { limited: false }
+  return {
+    limited: true,
+    retryAfterMs: Math.max(1, Math.ceil(limitUntil.value - monotonicNow())),
+    ...(limitWindow.value ? { window: limitWindow.value } : {}),
+  }
+}
+
+/**
+ * The gate every send path goes through first. While limited it answers true:
+ * nothing may leave, the notice draws the eye so the keypress did not fail
+ * silently, and the host hears `limit` again with what is left of the wait.
+ */
+function blockedByLimit(): boolean {
+  if (!isLimited.value) return false
+  tickLimit()
+  if (!isLimited.value) return false
+  limitNudge.value = true
+  clearLimitTimer('nudge')
+  limitNudgeTimer = setTimeout(() => {
+    limitNudgeTimer = null
+    limitNudge.value = false
+  }, LIMIT_NUDGE_MS)
+  emit('limit', currentLimit())
+  return true
+}
+
+function onVisibilityChange(): void {
+  if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+  tickLimit()
+}
 
 const host = useHost()
 const resolvedColorMode = ref<'light' | 'dark'>('light')
@@ -541,6 +767,14 @@ async function connect(): Promise<void> {
     isTyping.value = true
     turnOpen = true
   })
+  // The agent's request limit, from a refused send or announced by the hub.
+  // Never routed through `error`: it is a wait, and the red banner is for
+  // things that are broken.
+  client.on('limit', (state) => {
+    if (gen !== connectGen) return
+    if (state.limited) startLimit(state.retryAfterMs ?? 1000, state.window)
+    else endLimit()
+  })
   client.on('message', (m) => {
     if (gen !== connectGen) return
     const kind = noteKind(m)
@@ -609,11 +843,63 @@ function reloadPage(): void {
 }
 
 function flushOutbox(owner: BridleClient): void {
-  if (outbox.length > 0) isTyping.value = true
-  while (outbox.length > 0) {
-    const next = outbox.shift()!
-    owner.send(next.text, next.parts)
+  if (outbox.length === 0) return
+  // The limit filled while the socket was down: these would only be refused
+  // one by one. They go back to the message field, where the notice explains.
+  if (isLimited.value) {
+    for (const queued of outbox.splice(0)) takeBack(queued)
+    return
   }
+  isTyping.value = true
+  while (outbox.length > 0) dispatch(owner, outbox.shift()!)
+}
+
+/** Hand one message to the hub and act on what it answers. */
+function dispatch(owner: BridleClient, pending: IPendingSend): void {
+  void owner
+    .send(pending.text, pending.parts, { clientMessageId: pending.id })
+    .then((outcome) => settleSend(pending, outcome))
+}
+
+function settleSend(pending: IPendingSend, outcome: BridleSendOutcome): void {
+  if (outcome.status !== 'rejected') return
+  if (outcome.code === 'RATE_LIMITED') {
+    // Normally the client's `limit` event has already raised the notice; this
+    // covers an answer that outlived its socket ("New chat" in between).
+    if (!isLimited.value) startLimit(outcome.retryAfterMs ?? 1000, outcome.window)
+    takeBack(pending)
+    return
+  }
+  // Not delivered for another reason. The bubble stays, as it did when the
+  // hub answered with a line of its own (`AGENT_OFFLINE` still does, through
+  // the client) — but the agent is not working on it, so the dots stop.
+  isTyping.value = pending.wasTyping
+  if (outcome.code === 'ATTACHMENT_FAILED' && outcome.message) {
+    attachmentError.value = outcome.message
+  }
+}
+
+/**
+ * Undo a message the hub did not take: the bubble leaves the conversation,
+ * the text and attachments return to the message field, a form reopens, and
+ * the typing dots this send raised go down.
+ */
+function takeBack(pending: IPendingSend): void {
+  messages.value = messages.value.filter((m) => m.id !== pending.id)
+  isTyping.value = pending.wasTyping
+  if (pending.uiId !== undefined) {
+    const state = uiState.value[pending.uiId]
+    if (state) state.submitted = false
+    return
+  }
+  // Whatever was typed since stays, below the text that came back.
+  const typed = draft.value.trim()
+  if (pending.text) draft.value = typed ? `${pending.text}\n${draft.value}` : pending.text
+  const held = new Set(attachments.value.map((a) => a.id))
+  attachments.value = [
+    ...pending.attachments.filter((a) => !held.has(a.id)),
+    ...attachments.value,
+  ]
 }
 
 async function loadTranscript(owner: BridleClient, channel: string, gen: number): Promise<void> {
@@ -668,6 +954,10 @@ function send(): void {
   // An attachment whose upload has not landed has no URL yet, so it would go
   // out as a broken part. It stays in the tray and rides the next send.
   const ready = attachments.value.filter((a) => !a.uploading)
+  // The Send button, Enter, a suggestion chip and `sendMessage()` all end up
+  // here. While the agent's limit is full the draft stays exactly as it is —
+  // checked before the empty-draft exit, so a press on Send always answers.
+  if (blockedByLimit()) return
   if (!text && ready.length === 0) return
 
   // Attachment parts come first so the agent sees them before the caption
@@ -684,8 +974,18 @@ function send(): void {
   )
   if (text) parts.push({ type: 'text', text })
 
-  upsert({
+  // The bubble's id travels as `clientMessageId`: the hub keeps it as the
+  // message id, so a transcript replay merges onto this bubble instead of
+  // drawing the message twice.
+  const pending: IPendingSend = {
     id: randomId(),
+    text,
+    parts,
+    attachments: ready,
+    wasTyping: isTyping.value,
+  }
+  upsert({
+    id: pending.id,
     role: 'user',
     text,
     parts,
@@ -696,9 +996,10 @@ function send(): void {
   settleLog()
   if (isConnected.value) {
     isTyping.value = true
-    client.send(text, parts)
+    dispatch(client, pending)
   } else {
-    outbox.push({ text, parts })
+    // Nothing was typing for this turn when it is finally sent after `welcome`.
+    outbox.push({ ...pending, wasTyping: false })
   }
   draft.value = ''
   attachments.value = attachments.value.filter((a) => a.uploading)
@@ -1011,6 +1312,9 @@ function toggleUiCheckboxGroup(uiId: string, name: string, value: string): void 
 function submitUiForm(part: IBridleUiPart): void {
   const state = ensureUiState(part)
   if (state.submitted || !client) return
+  // Before validation and long before `submitted`: a form that could not be
+  // sent must stay open, with what was filled in.
+  if (blockedByLimit()) return
   // Validate required fields. First failure short-circuits with a single
   // human-readable error rendered above the submit button.
   for (const c of part.components) {
@@ -1039,15 +1343,24 @@ function submitUiForm(part: IBridleUiPart): void {
   // Show the user's submission in the transcript as a regular user turn.
   // Plain-text fallback so transcripts and non-Bridle channels stay readable.
   const summary = summarizeUiValues(part, state.values)
-  upsert({
+  const pending: IPendingSend = {
     id: randomId(),
+    text: '',
+    parts: [submitPart],
+    attachments: [],
+    wasTyping: isTyping.value,
+    // A refusal reopens the form instead of touching the message field.
+    uiId: part.uiId,
+  }
+  upsert({
+    id: pending.id,
     role: 'user',
     text: summary,
     parts: [submitPart],
     ts: Date.now(),
   })
   isTyping.value = true
-  client.send('', [submitPart])
+  dispatch(client, pending)
 }
 
 function summarizeUiValues(
@@ -1111,6 +1424,9 @@ const hasCustomEmpty = computed(
 
 function sendSuggestion(text: string): void {
   if (!isConnected.value) return
+  // Checked here as well as in `send()`: the chip would otherwise overwrite
+  // what the person is writing before `send()` got to refuse.
+  if (blockedByLimit()) return
   draft.value = text
   send()
 }
@@ -1275,6 +1591,8 @@ watch(
     messages.value = []
     cancelGreetingTimer()
     greetingShown.value = false
+    // The wait belonged to the agent this widget was talking to.
+    resetLimit()
     void connect()
   },
 )
@@ -1321,6 +1639,9 @@ onMounted(async () => {
   if (typeof document !== 'undefined') {
     document.addEventListener('click', onDocClick)
     document.addEventListener('keydown', onDocKeydown)
+    // Timers are throttled in a background tab; the moment the tab is looked
+    // at again the remaining wait is read off the deadline, not off a count.
+    document.addEventListener('visibilitychange', onVisibilityChange)
   }
   if (!props.apiUrl || !props.agentId) return
   await connect()
@@ -1336,7 +1657,11 @@ onBeforeUnmount(() => {
   if (typeof document !== 'undefined') {
     document.removeEventListener('click', onDocClick)
     document.removeEventListener('keydown', onDocKeydown)
+    document.removeEventListener('visibilitychange', onVisibilityChange)
   }
+  clearLimitTimer('tick')
+  clearLimitTimer('ready')
+  clearLimitTimer('nudge')
   client?.disconnect()
   client = null
   tokens.dispose()
@@ -1350,6 +1675,9 @@ defineExpose({
     if (isOpen.value) toggle()
   },
   sendMessage: (text: string) => {
+    // While limited nothing is sent and the visitor's own draft is left
+    // alone; the host hears `limit` again with the remaining wait.
+    if (blockedByLimit()) return
     draft.value = text
     send()
   },
@@ -1536,7 +1864,7 @@ defineExpose({
                 :key="i"
                 type="button"
                 class="bridle__suggestion"
-                :disabled="!isConnected"
+                :disabled="!isConnected || isLimited"
                 @click="sendSuggestion(s)"
               >{{ s }}</button>
             </div>
@@ -1796,7 +2124,8 @@ defineExpose({
               <button
                 type="submit"
                 class="bridle__ui-submit"
-                :disabled="!isConnected || ensureUiState(p).submitted"
+                :disabled="!isConnected || isLimited || ensureUiState(p).submitted"
+                :aria-describedby="isLimited ? LIMIT_NOTICE_ID : undefined"
               >{{ ensureUiState(p).submitted ? 'Sent' : (p.submit?.label ?? 'Apply') }}</button>
             </form>
           </div>
@@ -1846,6 +2175,51 @@ defineExpose({
 
       <div v-if="attachmentError" class="bridle__attach-error" role="alert">
         {{ attachmentError }}
+      </div>
+
+      <!--
+        The agent's request limit is full. A state, not an alert: it sits on
+        the message field's top edge, cannot be dismissed, and leaves when the
+        wait does. The live region is always in the DOM and holds text that
+        changes twice per wait, so a screen reader hears the notice once and
+        the end once; the ticking line next to it is hidden from it, and is
+        what Send is described by for someone who goes straight to the button.
+      -->
+      <div class="bridle__limit-region">
+        <p class="bridle__sr-only" role="status" aria-live="polite">{{ limitAnnouncement }}</p>
+        <div
+          v-if="showLimitNotice"
+          :id="LIMIT_NOTICE_ID"
+          class="bridle__limit"
+          :class="{ 'bridle__limit--nudge': limitNudge, 'bridle__limit--ready': limitReady }"
+          aria-hidden="true"
+        >
+          <svg class="bridle__limit-icon" viewBox="0 0 24 24" width="16" height="16">
+            <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2" />
+            <path
+              d="M12 7v5l3 2"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+          <div class="bridle__limit-text">
+            <template v-if="limitReady">
+              <span class="bridle__limit-line">{{ LIMIT_READY_TEXT }}</span>
+            </template>
+            <template v-else>
+              <span class="bridle__limit-line">{{ limitLabel }}</span>
+              <span class="bridle__limit-line bridle__limit-retry">{{ limitRetryText }}</span>
+            </template>
+          </div>
+          <span
+            v-if="!limitReady"
+            class="bridle__limit-bar"
+            :style="{ transform: `scaleX(${limitFraction})` }"
+          />
+        </div>
       </div>
 
       <div v-if="attachments.length" class="bridle__attachments">
@@ -1911,9 +2285,17 @@ defineExpose({
           @keydown="onKeydown"
           @paste="onPaste"
         />
+        <!--
+          While limited the button is unavailable but not `disabled`: it stays
+          reachable, so it can say why and for how long, and a press nudges
+          the notice instead of doing nothing at all.
+        -->
         <button
           type="submit"
-          :disabled="!draft.trim() && attachments.length === 0"
+          aria-label="Send"
+          :disabled="!isLimited && !draft.trim() && attachments.length === 0"
+          :aria-disabled="isLimited ? 'true' : undefined"
+          :aria-describedby="isLimited ? LIMIT_NOTICE_ID : undefined"
         >
           <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
             <path
@@ -1959,6 +2341,13 @@ defineExpose({
   --bridle-error-bg: #fee2e2;
   --bridle-error-fg: #991b1b;
   --bridle-error-border: #fca5a5;
+  /* Neutral information, e.g. the request-limit notice. Derived from the
+     theme's own surface colours, so every palette gets a matching pair. */
+  --bridle-info-bg: var(--bridle-bubble-bg);
+  --bridle-info-bg-strong: color-mix(in srgb, var(--bridle-primary) 14%, var(--bridle-bubble-bg));
+  --bridle-info-fg: var(--bridle-fg);
+  --bridle-info-border: var(--bridle-border);
+  --bridle-info-accent: var(--bridle-muted);
   color-scheme: light;
 }
 
@@ -1974,6 +2363,11 @@ defineExpose({
   --bridle-error-bg: rgba(248, 113, 113, 0.14);
   --bridle-error-fg: #fecaca;
   --bridle-error-border: rgba(248, 113, 113, 0.32);
+  --bridle-info-bg: var(--bridle-bubble-bg);
+  --bridle-info-bg-strong: color-mix(in srgb, var(--bridle-primary) 22%, var(--bridle-bubble-bg));
+  --bridle-info-fg: var(--bridle-fg);
+  --bridle-info-border: var(--bridle-border);
+  --bridle-info-accent: var(--bridle-muted);
   color-scheme: dark;
 }
 
@@ -2631,11 +3025,104 @@ defineExpose({
   justify-content: center;
   transition: opacity 0.15s ease;
 }
-.bridle__input button[type="submit"]:disabled {
+.bridle__input button[type="submit"]:disabled,
+.bridle__input button[type="submit"][aria-disabled="true"] {
   opacity: 0.4;
   cursor: not-allowed;
 }
-.bridle__input button[type="submit"]:not(:disabled):hover { opacity: 0.9; }
+.bridle__input button[type="submit"]:not(:disabled):not([aria-disabled="true"]):hover { opacity: 0.9; }
+
+/* ---- Request-limit notice ----
+   Sits on the message field's top edge at the same width. Information, not
+   an error: neutral colours and a clock, never the red of the banner. */
+.bridle__limit-region {
+  flex-shrink: 0;
+}
+
+.bridle__sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.bridle__limit {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 12px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--bridle-info-fg);
+  background: var(--bridle-info-bg);
+  border-top: 1px solid var(--bridle-info-border);
+  overflow: hidden;
+  transition: background-color 0.2s ease;
+}
+
+.bridle__limit-icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+  opacity: 0.75;
+}
+
+/* Two lines that become one when there is room, never more than two. */
+.bridle__limit-text {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 6px;
+  min-width: 0;
+}
+
+.bridle__limit-line {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+/* Digits of equal width, so the line does not shiver as it counts down. */
+.bridle__limit-retry {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The wait, drawn: a thin line that shortens to nothing. Decoration only —
+   the time is in the text. */
+.bridle__limit-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--bridle-info-accent);
+  transform-origin: left center;
+  transition: transform 1s linear;
+}
+
+/* A send that went nowhere: the notice answers with a brief emphasis. */
+.bridle__limit--nudge {
+  background: var(--bridle-info-bg-strong);
+  animation: bridle-limit-nudge 0.3s ease;
+}
+
+@keyframes bridle-limit-nudge {
+  0%, 100% { transform: translateX(0); }
+  30% { transform: translateX(-3px); }
+  70% { transform: translateX(3px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bridle__limit-bar { display: none; }
+  .bridle__limit { transition: none; }
+  .bridle__limit--nudge { animation: none; }
+}
 
 /* ---- Attachments ---- */
 .bridle__file-input {

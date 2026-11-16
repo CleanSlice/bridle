@@ -36,8 +36,14 @@ import {
  * out of the box every connection takes path 2.
  *
  * Events (browser → hub):
- *   "message"  { text, images? }
+ *   "message"  { text, images?, clientMessageId? }
  *   "ping"     {}
+ *
+ * SDK ≥ 0.16.0 sends a `clientMessageId` with every `message` and passes a
+ * socket.io acknowledgement callback. This reference hub ignores both and
+ * never acknowledges; the SDK then treats the message as taken. A hub that
+ * does answer returns a `BridleSendAck` (domain/bridle.types.ts) and must
+ * then NOT also send its "agent is not connected" line as a `message`.
  *
  * Events (hub → browser):
  *   "welcome"       { clientId }
@@ -48,6 +54,7 @@ import {
  *   "typing"        { ts }
  *   "pong"          { ts }
  *   "bridle_error"  { code, agentId?, origin? }  // emitted just before a rejected handshake disconnects, so the SDK can show a reason
+ *   "agent_limit"   { agentId, limited, retryAfterMs?, window? }  // NOT emitted by this reference hub. A hub that limits requests per agent sends it when an hour/day window is full or room was made early (IBridleAgentLimitEvent)
  */
 @WebSocketGateway({ namespace: '/ws/client' })
 export class BridleClientWsHandler implements OnGatewayConnection, OnGatewayDisconnect {

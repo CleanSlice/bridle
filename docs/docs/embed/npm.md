@@ -52,6 +52,9 @@ const chat = init({
 | `sessionExpiredLabel` | string | no | Banner text when the session could not be renewed. Default: `Your session has expired.` |
 | `reconnectLabel` | string | no | Banner button. Default: `Reconnect` |
 | `reloadLabel` | string | no | Banner button for static tokens. Default: `Reload the page` |
+| `onLimit` | `(state: IBridleLimitState) => void` | no | The agent's request limit filled up or opened again. See [Request limits](#request-limits) |
+| `limitLabel` | string | no | First line of the limit notice. Default: `This agent has reached its message limit.` |
+| `limitRetryLabel` | string | no | Second line of the limit notice; `{time}` is replaced by the countdown or the time of day. Default: `Try again in {time}.` |
 
 \* `apiUrl` can be omitted if the SDK was loaded from the same origin as the hub. With the bundler, you usually pass it explicitly.
 
@@ -64,11 +67,74 @@ interface IBridleInstance {
   element: HTMLElement      // The <bridle-chat> custom element
   open(): void              // Open the panel (floating mode)
   close(): void             // Close the panel (floating mode)
-  sendMessage(text: string): void
+  sendMessage(text: string): void // Sends nothing while the agent's limit is full — onLimit fires again
   setToken(token: string): void // Replace a static token; reconnects, keeps the conversation
   destroy(): void           // Tear down and disconnect
 }
 ```
+
+## Request limits
+
+A hub can cap how many requests an agent takes per minute, hour and day. When a limit is full the widget does not show an error. A calm notice sits on top of the message field:
+
+```
+(clock)  This agent has reached its message limit.
+         Try again in 0:42.
+```
+
+- The message that was refused does not stay in the conversation, and no typing dots start. Its text and attachments are back in the message field.
+- The visitor can keep typing and reading. The Send button is unavailable (`aria-disabled`, described by the notice) and Enter sends nothing — either one nudges the notice instead of failing silently. Suggestion chips and form buttons are disabled for the wait.
+- When the wait ends the notice says "You can send your message now." for a moment and leaves. **Nothing is sent automatically** — the visitor presses Send.
+- When an hour or day limit is already full, the hub says so on connect and the notice is there before anything is typed.
+- "New chat" does not clear the wait: the limit is the agent's, not the conversation's.
+
+| The wait is | The second line reads |
+|-------------|-----------------------|
+| Under an hour | `Try again in 0:42.` / `Try again in 12:05.` — ticking |
+| An hour or more, same day | `Try again after 14:30.` — the local time of day, formatted by the browser's locale |
+| Past midnight | `Try again tomorrow after 09:15.` |
+
+Both lines can be replaced:
+
+```ts
+init({
+  // …
+  limitLabel: 'Our assistant is busy right now.',
+  limitRetryLabel: 'Please try again in {time}.',
+})
+```
+
+`{time}` becomes the countdown (`0:42`). The "after" / "tomorrow after" wording for long waits and the "You can send your message now." line are built in and English; with your own `limitRetryLabel`, a wait of an hour or more puts the bare time of day into `{time}`.
+
+To react on the page — hide a "Ask our assistant" button, log it, offer another channel — use `onLimit`:
+
+```ts
+interface IBridleLimitState {
+  limited: boolean
+  retryAfterMs?: number                 // present when limited
+  window?: 'minute' | 'hour' | 'day'    // present when limited
+}
+
+const chat = init({
+  // …
+  onLimit: ({ limited, retryAfterMs }) => {
+    askButton.disabled = limited
+    if (limited) console.log(`assistant is back in ${Math.ceil(retryAfterMs / 1000)} s`)
+  },
+})
+```
+
+It is called with `limited: true` when a send is refused, when the hub announces a full hour or day limit, and when `chat.sendMessage()` is tried during the wait (nothing is sent; you get the remaining wait). It is called with `limited: false` when the wait ends. `onError` is not called for a limit.
+
+The same state is dispatched on the element as a `limit` event. Vue passes a custom element's event arguments as an array, so the state is `event.detail[0]`:
+
+```ts
+chat.element.addEventListener('limit', (e) => {
+  const state = (e as CustomEvent<[IBridleLimitState]>).detail[0]
+})
+```
+
+A widget older than 0.16.0 cannot show the notice; the hub sends it a plain assistant line instead ("This agent has reached its message limit. Try again in about 40 seconds.").
 
 ## Attachments
 

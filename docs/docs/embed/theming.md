@@ -17,6 +17,11 @@ The chat widget uses **Shadow DOM** for style isolation. Override appearance via
 | `--bridle-shadow` | `0 12px 32px rgba(0,0,0,.16)` | `0 12px 32px rgba(0,0,0,.16)` | Panel/FAB shadow |
 | `--bridle-z` | `2147483600` | `2147483600` | z-index of the floating panel |
 | `--bridle-font` | system stack | system stack | Font family |
+| `--bridle-info-bg` | `var(--bridle-bubble-bg)` | `var(--bridle-bubble-bg)` | Background of neutral notices — the [request-limit notice](/embed/npm#request-limits) |
+| `--bridle-info-bg-strong` | primary 14% over `--bridle-bubble-bg` | primary 22% over `--bridle-bubble-bg` | The same notice for the moment it is nudged |
+| `--bridle-info-fg` | `var(--bridle-fg)` | `var(--bridle-fg)` | Notice text |
+| `--bridle-info-border` | `var(--bridle-border)` | `var(--bridle-border)` | Notice top border |
+| `--bridle-info-accent` | `var(--bridle-muted)` | `var(--bridle-muted)` | The thin line that shrinks with the wait |
 
 The widget switches to its dark palette automatically when `prefers-color-scheme: dark`. Explicit overrides win.
 

@@ -124,6 +124,66 @@ export interface IBridleMessage {
   kind?: BridleMessageKind
 }
 
+// ── Request limits ────────────────────────────────────────────
+// A hub may cap how many requests an agent takes per minute, hour and day.
+// A full window is a state to wait out, not an error: it travels in the
+// acknowledgement of a send and in the `agent_limit` event, never in
+// `bridle_error`. See docs/PROTOCOL.md § Request limits.
+
+/** The window that set the wait. */
+export type BridleLimitWindow = 'minute' | 'hour' | 'day'
+
+/**
+ * Payload of the `limit` event (client, custom element and `onLimit`).
+ * `limited: true` carries the wait; `limited: false` says sending is open again.
+ */
+export interface IBridleLimitState {
+  limited: boolean
+  /** Milliseconds until a message will be accepted. Present when `limited`. */
+  retryAfterMs?: number
+  /** Present when `limited` and the hub named the window. */
+  window?: BridleLimitWindow
+}
+
+/**
+ * What the hub answers to a `message` that carried a `clientMessageId`, through
+ * the socket.io acknowledgement. Mirrors `BridleSendAck` in
+ * nestjs/domain/bridle.types.ts.
+ */
+export type BridleSendAck =
+  | { status: 'accepted'; messageId: string; ts?: number; duplicate?: boolean }
+  | {
+      status: 'rejected'
+      /**
+       * `RATE_LIMITED`, `AGENT_OFFLINE`, `ATTACHMENT_FAILED`, `SHARE_REJECTED`,
+       * `EMPTY` — or whatever a newer hub adds; treat an unknown code as "not
+       * delivered".
+       */
+      code: string
+      message?: string
+      /** `RATE_LIMITED` only: milliseconds until a message will be accepted. */
+      retryAfterMs?: number
+      /** `RATE_LIMITED` only: the window that set the wait. */
+      window?: BridleLimitWindow
+    }
+
+/**
+ * How one `client.send()` ended. The acknowledgement as the hub gave it, or
+ * `unacknowledged` when none came: a hub that does not acknowledge (the
+ * reference hub, older builds) took the message the way it always did.
+ */
+export type BridleSendOutcome =
+  | BridleSendAck
+  | { status: 'unacknowledged'; messageId: string }
+
+export interface IBridleSendOptions {
+  /**
+   * Id for this message, at most 100 characters. The hub keeps it as the
+   * message id end to end and ignores a repeat of it. Minted when omitted.
+   */
+  clientMessageId?: string
+}
+
 export interface IBridleInitOptions {
   /**
    * Hub origin, e.g. `https://hub.example.com`. If omitted, the SDK infers it
@@ -274,10 +334,29 @@ export interface IBridleInitOptions {
   reconnectLabel?: string
   /** Banner button shown for a static token, which only a reload can replace. Default: "Reload the page". */
   reloadLabel?: string
+  /**
+   * First line of the notice shown above the message field while the agent's
+   * request limit is full. Default: "This agent has reached its message limit."
+   */
+  limitLabel?: string
+  /**
+   * Second line of that notice. `{time}` is replaced by the countdown
+   * (`0:42`, `12:05`) or, for a wait of an hour or more, by the local time of
+   * day. Default: "Try again in {time}." — with the default, a long wait reads
+   * "Try again after 14:30." / "Try again tomorrow after 09:15.".
+   */
+  limitRetryLabel?: string
   /** Hooks for headless side effects in addition to the UI. */
   onReady?: () => void
   onMessage?: (message: IBridleMessage) => void
   onError?: (error: Error) => void
+  /**
+   * The agent's request limit filled up or opened again. Called with
+   * `limited: true` and the wait on a refused send, when the hub announces a
+   * full window, and when `sendMessage()` is tried during the wait; with
+   * `limited: false` when the wait ends. Not an error — `onError` stays quiet.
+   */
+  onLimit?: (state: IBridleLimitState) => void
   /**
    * The hub rejected the token and the widget cannot get a new one itself —
    * `token` is a static string. Answer with `instance.setToken(newToken)`;
@@ -294,7 +373,11 @@ export interface IBridleInstance {
   open: () => void
   /** Close the panel (floating mode). */
   close: () => void
-  /** Programmatically send a user message. */
+  /**
+   * Programmatically send a user message. While the agent's request limit is
+   * full nothing is sent: `onLimit` / the `limit` event fires again with the
+   * remaining wait.
+   */
   sendMessage: (text: string) => void
   /**
    * Replace the token (for static-token integrations, typically from

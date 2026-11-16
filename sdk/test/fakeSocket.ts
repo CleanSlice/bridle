@@ -9,11 +9,21 @@ type Handler = (...args: any[]) => void
 type AuthPayload = { token: string } & Record<string, unknown>
 type AuthOption = (cb: (data: AuthPayload) => void) => void
 
+type Ack = (response: unknown) => void
+
 export interface IHub {
   /** Called on every handshake; return the rejection code, or null to welcome. */
   check: (auth: AuthPayload) => string | null
   /** Optional: a non-fatal warning to emit after an accepted handshake. */
   warn?: (auth: AuthPayload) => string | null
+  /**
+   * Optional: the acknowledgement for a `message`, as Ranch answers a sender
+   * that passed a `clientMessageId`. Unset, or returning undefined, is a hub
+   * that never acknowledges (the reference hub, older Ranch builds).
+   */
+  ack?: (payload: Record<string, unknown>) => unknown
+  /** Optional: frames the hub emits right after `welcome` (e.g. `agent_limit`). */
+  afterWelcome?: (auth: AuthPayload) => Array<[event: string, payload: unknown]>
 }
 
 export const sockets: FakeSocket[] = []
@@ -22,6 +32,8 @@ export const hub: IHub = { check: () => null }
 export class FakeSocket {
   readonly handshakes: AuthPayload[] = []
   readonly sent: unknown[] = []
+  /** The ack callback passed with each `message`, by position in `sent`. */
+  readonly acks: Array<Ack | undefined> = []
   connected = false
   private handlers = new Map<string, Handler[]>()
 
@@ -37,8 +49,13 @@ export class FakeSocket {
     return this
   }
 
-  emit(event: string, payload: unknown): this {
-    if (event === 'message') this.sent.push(payload)
+  emit(event: string, payload: unknown, ack?: Ack): this {
+    if (event !== 'message') return this
+    this.sent.push(payload)
+    this.acks.push(ack)
+    // The answer travels back over the wire, so it never lands in the same tick.
+    const response = hub.ack?.(payload as Record<string, unknown>)
+    if (ack && response !== undefined) queueMicrotask(() => ack(response))
     return this
   }
 
@@ -57,6 +74,7 @@ export class FakeSocket {
       const warning = hub.warn?.(data)
       if (warning) this.trigger('bridle_warning', { code: warning })
       this.trigger('welcome', { clientId: `visitor-of-${data.token || 'anon'}` })
+      for (const [event, payload] of hub.afterWelcome?.(data) ?? []) this.trigger(event, payload)
     })
     return this
   }
@@ -83,6 +101,20 @@ export function resetFakes(): void {
   sockets.length = 0
   hub.check = () => null
   hub.warn = undefined
+  hub.ack = undefined
+  hub.afterWelcome = undefined
+}
+
+/** Fake timers that also move `performance.now()`, which holds the limit deadline. */
+export const TIMERS_WITH_PERFORMANCE = {
+  toFake: [
+    'setTimeout',
+    'clearTimeout',
+    'setInterval',
+    'clearInterval',
+    'Date',
+    'performance',
+  ] as const,
 }
 
 /** `vi.mock('socket.io-client', ...)` factory. */

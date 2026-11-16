@@ -72,7 +72,7 @@ interface IBridleClientOptions {
 
 Opens the WebSocket. Resolves immediately after `socket.connect()` is called — the actual `open` event fires asynchronously via the listener.
 
-### `client.send(text: string, parts?: BridlePart[]): void`
+### `client.send(text, parts?, options?): Promise<BridleSendOutcome>`
 
 Sends a user message to the agent. If `parts` is omitted, a text-only part is constructed from `text`. To send rich content (images, files), pass parts explicitly:
 
@@ -82,6 +82,36 @@ client.send('See this image', [
   { type: 'image', base64: '...', mediaType: 'image/png' },
 ])
 ```
+
+Since 0.16.0 every send carries a `clientMessageId` (yours via `options.clientMessageId`, otherwise minted) and asks the hub to acknowledge it. The returned promise resolves with the answer and **never rejects**, so code that ignores it — `client.send('Hello')` — works as before. It still throws synchronously when called before `connect()`.
+
+```ts
+type BridleSendOutcome =
+  | { status: 'accepted'; messageId: string; ts?: number; duplicate?: boolean }
+  | { status: 'rejected'; code: string; message?: string; retryAfterMs?: number; window?: 'minute' | 'hour' | 'day' }
+  | { status: 'unacknowledged'; messageId: string }
+```
+
+| Outcome | Meaning | What the client does besides resolving |
+|---------|---------|----------------------------------------|
+| `accepted` | Forwarded to the agent | — |
+| `rejected` `RATE_LIMITED` | The agent's [request limit](/protocol/websocket#request-limits) is full | Fires `limit`; holds sending until the wait is over |
+| `rejected` `AGENT_OFFLINE` | No runtime is connected for this agent | Fires `message` with "Agent is not connected. Please try again later." — the line a hub sends to clients it cannot acknowledge |
+| `rejected`, any other code | Not delivered (`ATTACHMENT_FAILED`, `SHARE_REJECTED`, `EMPTY`, …) | — |
+| `unacknowledged` | The hub did not answer within 10 s. It does not acknowledge (the reference hub, older builds) and took the message as it always did | — |
+
+**While limited, `send()` sends nothing**: it fires `limit` again with the remaining wait and resolves `rejected` / `RATE_LIMITED`. Take the message out of your UI and give the text back to the person — do not queue it to fire when the wait ends.
+
+```ts
+const outcome = await client.send(text)
+if (outcome.status === 'rejected' && outcome.code === 'RATE_LIMITED') {
+  restoreDraft(text)   // the countdown comes from the `limit` event
+}
+```
+
+### `client.getLimit(): IBridleLimitState`
+
+`{ limited: false }`, or `{ limited: true, retryAfterMs, window? }` with what is left of the wait right now. The deadline is kept on `performance.now()`, so a wrong wall clock or a background tab does not distort it — call this (for instance on `visibilitychange`) rather than counting down from the number you were given.
 
 ### `client.disconnect(): void`
 
@@ -101,6 +131,9 @@ Subscribe to events:
 | `message` | `IBridleMessage` | Final agent message |
 | `stream` | `IBridleMessage` | Partial agent text (accumulated, not delta) |
 | `stream_end` | `IBridleMessage` | Streaming finished |
+| `limit` | `{ limited: boolean, retryAfterMs?: number, window?: 'minute' \| 'hour' \| 'day' }` | The agent's request limit is full (`limited: true`: a send was refused, the hub announced a full hour or day window, or `send()` was called during the wait) or sending is open again (`limited: false`: the wait ran out, or the hub made room early) |
+
+A full limit is an expected state. It is reported through `limit` only — never through `error`, and never as a `BridleAuthError`.
 
 ### `client.off(event, handler)`
 
