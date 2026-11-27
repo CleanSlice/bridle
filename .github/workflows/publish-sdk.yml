@@ -6,9 +6,16 @@ name: Publish SDK
 #
 # Triggers:
 #   - push to main touching sdk/** — publishes only when sdk/package.json
-#     carries a version npm does not have yet (a version bump is the release);
-#   - tag sdk-v<version> — publishes, the tag must match sdk/package.json;
+#     carries a version npm does not have yet (a version bump is the release),
+#     then tags the commit sdk-v<version> and opens the GitHub Release with
+#     that version's section of sdk/CHANGELOG.md;
+#   - tag sdk-v<version> — the tag must match sdk/package.json; publishes when
+#     npm does not have the version yet, and makes sure the Release exists.
+#     A tag for a version already on npm is not an error (CLEAN-266);
 #   - manual run — publishes with a chosen dist-tag, optionally --dry-run.
+#
+# The tag this workflow creates is pushed with GITHUB_TOKEN, which does not
+# start another run.
 
 on:
   push:
@@ -38,7 +45,7 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write # tag + GitHub Release
       id-token: write
     defaults:
       run:
@@ -72,12 +79,12 @@ jobs:
         run: |
           PKG=$(node -p "require('./package.json').name")
           VERSION=$(node -p "require('./package.json').version")
-          if [ "${{ github.event_name }}" != "push" ] || [ "${{ github.ref_type }}" = "tag" ]; then
+          if [ "${{ github.event_name }}" != "push" ]; then
             echo "publish=true" >> "$GITHUB_OUTPUT"
-            echo "Publishing $VERSION (manual or tag trigger)"
+            echo "Publishing $VERSION (manual run)"
           elif npm view "$PKG@$VERSION" version >/dev/null 2>&1; then
             echo "publish=false" >> "$GITHUB_OUTPUT"
-            echo "$PKG@$VERSION is already on npm — bump sdk/package.json to release."
+            echo "$PKG@$VERSION is already on npm — nothing to publish."
           else
             echo "publish=true" >> "$GITHUB_OUTPUT"
             echo "$PKG@$VERSION is not on npm yet — publishing."
@@ -100,3 +107,23 @@ jobs:
             fi
           fi
           npm publish $ARGS
+
+      # A release people can see: the tag and the GitHub Release, after a
+      # publish from main, or for a tag somebody pushed by hand.
+      - name: Tag and release on GitHub
+        if: github.event_name == 'push' && (steps.gate.outputs.publish == 'true' || github.ref_type == 'tag')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="sdk-v$VERSION"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists."
+            exit 0
+          fi
+          awk -v v="## $VERSION" '$0 == v {f=1; next} /^## / {f=0} f' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          if [ -s "$RUNNER_TEMP/notes.md" ]; then
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "SDK $VERSION" --notes-file "$RUNNER_TEMP/notes.md"
+          else
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "SDK $VERSION" --generate-notes
+          fi
