@@ -42,7 +42,8 @@ When the script loads, it auto-registers a `<bridle-chat>` Custom Element and mo
 | `data-suggestions` | optional | Suggestion chips rendered on the empty state. Pipe-separated (`Q1|Q2|Q3`) or a JSON array string. Clicking a chip sends it as a user message |
 | `data-session-expired-label` | `Your session has expired.` | Banner text when the hub no longer accepts the token and it could not be renewed |
 | `data-reconnect-label` | `Reconnect` | Banner button that gets a new token and reconnects |
-| `data-reload-label` | `Reload the page` | Banner button shown for a static token |
+| `data-reload-label` | `Reload the page` | Banner button shown for a static token and for a connection failure |
+| `data-connection-error-label` | `There is an issue connecting to the service. Please refresh the page.` | Banner text when the hub cannot be reached (network, proxy, hub down) |
 
 ## Choosing where to load the script from
 

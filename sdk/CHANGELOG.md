@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.16.0
+
+A visitor whose network blocks WebSockets can chat, and a connection that
+fails says so in plain words (CLEAN-264).
+
+Before: the widget connected over WebSocket only. Behind a proxy or firewall
+that drops the upgrade it never connected, and the banner showed socket.io's
+raw `websocket error`.
+
+### Integrator-facing
+
+- **Long-polling fallback.** The client tries WebSocket first and falls back to
+  HTTP long-polling when it does not get through. Nothing to configure; the hub
+  already accepts both. A hub running more than one replica needs sticky
+  sessions for polling, as socket.io always has.
+- **Connection banner.** A failure to reach the hub now reads "There is an
+  issue connecting to the service. Please refresh the page." with **Reconnect**
+  and **Reload the page** buttons. Text: `connectionErrorLabel`
+  (`data-connection-error-label`); the buttons reuse `reconnectLabel` and
+  `reloadLabel`. The raw error still reaches `onError` / the `error` event.
+- **Dependency.** `socket.io-client` `^4.8.0` (was `^4.7.5`), the first
+  version that can try a second transport.
+
 ## 0.15.0
 
 Embed tokens are renewed instead of leaving the chat rejected (CLEAN-188).

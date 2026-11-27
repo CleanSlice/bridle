@@ -177,7 +177,11 @@ export class BridleClient {
       ...(prompt ? { prompt } : {}),
     }
     const socket = io(`${url}/ws/client`, {
-      transports: ['websocket'],
+      // WebSocket first, long-polling when it does not get through (a proxy
+      // or firewall that drops the upgrade). `tryAllTransports` is what makes
+      // socket.io try the second one: by default it gives up after the first.
+      transports: ['websocket', 'polling'],
+      tryAllTransports: true,
       reconnection: true,
       reconnectionDelay: 2000,
       // A callback, not an object: socket.io calls it on every (re)connect, so

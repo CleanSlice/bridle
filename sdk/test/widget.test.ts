@@ -191,3 +191,43 @@ describe('BridleChat with pictures turned off', () => {
     expect(wrapper!.find('.bridle__attach').exists()).toBe(true)
   })
 })
+
+describe('BridleChat when the hub cannot be reached', () => {
+  it('says so in plain words with Reconnect and Reload, never the raw transport message', async () => {
+    valid.add('tok')
+    hub.network = () => 'websocket error'
+    const chat = mountChat({ token: 'tok' })
+    await settle()
+
+    const banner = chat.find('.bridle__banner--error')
+    expect(banner.text()).toContain('There is an issue connecting to the service. Please refresh the page.')
+    expect(banner.text()).not.toContain('websocket error')
+    expect(banner.findAll('button').map((b) => b.text())).toEqual(['Reconnect', 'Reload the page'])
+    expect(onTokenExpired).not.toHaveBeenCalled()
+  })
+
+  it('Reconnect opens a new connection and clears the banner once the network is back', async () => {
+    valid.add('tok')
+    hub.network = () => 'websocket error'
+    const chat = mountChat({ token: 'tok' })
+    await settle()
+    const attempts = sockets.length
+
+    hub.network = undefined
+    await chat.find('.bridle__banner--error button').trigger('click')
+    await settle()
+
+    expect(sockets.length).toBe(attempts + 1)
+    expect(sockets.at(-1)!.connected).toBe(true)
+    expect(chat.find('.bridle__banner--error').exists()).toBe(false)
+  })
+
+  it("takes the integrator's wording", async () => {
+    valid.add('tok')
+    hub.network = () => 'websocket error'
+    const chat = mountChat({ token: 'tok', connectionErrorLabel: 'Chat is unavailable on this network.' })
+    await settle()
+
+    expect(chat.find('.bridle__banner--error').text()).toContain('Chat is unavailable on this network.')
+  })
+})
