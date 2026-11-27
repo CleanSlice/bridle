@@ -44,14 +44,22 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # Installs and builds third-party code, so it can read the repo and ask
+    # npm for a publish token, and nothing else. The tag and the Release are
+    # made by the `release` job below, which runs no npm code.
     permissions:
-      contents: write # tag + GitHub Release
+      contents: read
       id-token: write
+    outputs:
+      version: ${{ steps.gate.outputs.version }}
+      published: ${{ steps.gate.outputs.publish }}
     defaults:
       run:
         working-directory: sdk
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -79,6 +87,7 @@ jobs:
         run: |
           PKG=$(node -p "require('./package.json').name")
           VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           if [ "${{ github.event_name }}" != "push" ]; then
             echo "publish=true" >> "$GITHUB_OUTPUT"
             echo "Publishing $VERSION (manual run)"
@@ -108,20 +117,31 @@ jobs:
           fi
           npm publish $ARGS
 
-      # A release people can see: the tag and the GitHub Release, after a
-      # publish from main, or for a tag somebody pushed by hand.
+  # A release people can see: the tag and the GitHub Release, after a publish
+  # from main, or for a tag somebody pushed by hand. Its own job so that the
+  # write permission never meets `npm ci` or the build.
+  release:
+    needs: publish
+    if: github.event_name == 'push' && (needs.publish.outputs.published == 'true' || github.ref_type == 'tag')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
       - name: Tag and release on GitHub
-        if: github.event_name == 'push' && (steps.gate.outputs.publish == 'true' || github.ref_type == 'tag')
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.publish.outputs.version }}
         run: |
-          VERSION=$(node -p "require('./package.json').version")
           TAG="sdk-v$VERSION"
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG already exists."
             exit 0
           fi
-          awk -v v="## $VERSION" '$0 == v {f=1; next} /^## / {f=0} f' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          awk -v v="## $VERSION" '$0 == v {f=1; next} /^## / {f=0} f' sdk/CHANGELOG.md > "$RUNNER_TEMP/notes.md"
           if [ -s "$RUNNER_TEMP/notes.md" ]; then
             gh release create "$TAG" --target "$GITHUB_SHA" --title "SDK $VERSION" --notes-file "$RUNNER_TEMP/notes.md"
           else
