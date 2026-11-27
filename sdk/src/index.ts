@@ -139,6 +139,7 @@ function init(opts: IBridleInitOptions): IBridleInstance {
   if (opts.sessionExpiredLabel) el.setAttribute('session-expired-label', opts.sessionExpiredLabel)
   if (opts.reconnectLabel) el.setAttribute('reconnect-label', opts.reconnectLabel)
   if (opts.reloadLabel) el.setAttribute('reload-label', opts.reloadLabel)
+  if (opts.connectionErrorLabel) el.setAttribute('connection-error-label', opts.connectionErrorLabel)
 
   // A static token goes into the observable `token` attribute; setting it
   // again later (`setToken`) reconnects with the new one. A function is kept
@@ -249,6 +250,7 @@ function autoMount(): void {
     sessionExpiredLabel: ds.sessionExpiredLabel,
     reconnectLabel: ds.reconnectLabel,
     reloadLabel: ds.reloadLabel,
+    connectionErrorLabel: ds.connectionErrorLabel,
     suggestions: ds.suggestions ? parseSuggestionsAttr(ds.suggestions) : undefined,
     customCss: ds.customCss,
     stylesheets,

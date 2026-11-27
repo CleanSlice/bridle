@@ -217,3 +217,27 @@ describe('BridleClient capabilities', () => {
     ])
   })
 })
+
+describe('BridleClient transports', () => {
+  it('falls back to long-polling when the WebSocket does not get through', async () => {
+    const client = new BridleClient({ apiUrl: 'http://hub', agentId: 'agent' })
+    await client.connect()
+
+    // WebSocket first, polling second, and the second is actually tried:
+    // without `tryAllTransports` socket.io gives up after the first one.
+    expect(sockets[0].options.transports).toEqual(['websocket', 'polling'])
+    expect(sockets[0].options.tryAllTransports).toBe(true)
+  })
+
+  it('reports a network failure as a plain error, not as a hub rejection', async () => {
+    hub.network = () => 'websocket error'
+    const errors: Error[] = []
+    const client = new BridleClient({ apiUrl: 'http://hub', agentId: 'agent' })
+    client.on('error', (e) => errors.push(e))
+    await client.connect()
+    await flush()
+
+    expect(errors).toHaveLength(1)
+    expect(errors[0]).not.toBeInstanceOf(BridleAuthError)
+  })
+})

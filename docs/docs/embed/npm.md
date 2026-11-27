@@ -51,7 +51,8 @@ const chat = init({
 | `onTokenExpired` | `() => void` | no | A static `token` was rejected and the widget cannot renew it — answer with `chat.setToken()` |
 | `sessionExpiredLabel` | string | no | Banner text when the session could not be renewed. Default: `Your session has expired.` |
 | `reconnectLabel` | string | no | Banner button. Default: `Reconnect` |
-| `reloadLabel` | string | no | Banner button for static tokens. Default: `Reload the page` |
+| `reloadLabel` | string | no | Banner button for static tokens and connection failures. Default: `Reload the page` |
+| `connectionErrorLabel` | string | no | Banner text when the hub cannot be reached. Default: `There is an issue connecting to the service. Please refresh the page.` |
 
 \* `apiUrl` can be omitted if the SDK was loaded from the same origin as the hub. With the bundler, you usually pass it explicitly.
 

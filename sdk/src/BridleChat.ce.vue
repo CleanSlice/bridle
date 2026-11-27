@@ -175,8 +175,13 @@ const props = withDefaults(
     sessionExpiredLabel?: string
     /** Banner button that asks for a new token and reconnects. */
     reconnectLabel?: string
-    /** Banner button shown when the token is static and only a reload can get a new one. */
+    /**
+     * Banner button that reloads the page: next to an expired static token,
+     * which only a reload can replace, and next to a connection failure.
+     */
     reloadLabel?: string
+    /** Banner text when the hub cannot be reached at all (network, proxy, hub down). */
+    connectionErrorLabel?: string
   }>(),
   {
     title: 'Agent Chat',
@@ -191,6 +196,7 @@ const props = withDefaults(
     sessionExpiredLabel: 'Your session has expired.',
     reconnectLabel: 'Reconnect',
     reloadLabel: 'Reload the page',
+    connectionErrorLabel: 'There is an issue connecting to the service. Please refresh the page.',
   },
 )
 
@@ -595,6 +601,17 @@ async function reconnectSession(): Promise<void> {
   }
   connectionError.value = null
   await connect()
+}
+
+/**
+ * Banner action when the hub could not be reached: start over with a new
+ * socket, keeping the conversation on screen. socket.io keeps retrying on its
+ * own; this is for the visitor who has just fixed their network and does not
+ * want to wait, and it also restarts a client that gave up.
+ */
+function retryConnection(): void {
+  connectionError.value = null
+  if (props.apiUrl && props.agentId) void connect()
 }
 
 /** A new credential for the same visitor: reconnect, keep the conversation on screen. */
@@ -1500,8 +1517,19 @@ defineExpose({
         <template v-else-if="displayedError instanceof BridleAuthError">
           Connection error
         </template>
+        <!-- Anything else never reached the hub: a transport failure, or a
+             token provider that threw. The raw message ("websocket error")
+             tells a visitor nothing, so it stays in the `error` event. -->
         <template v-else>
-          {{ displayedError.message || 'Connection error' }}
+          {{ connectionErrorLabel }}
+          <span class="bridle__banner-actions">
+            <button type="button" class="bridle__banner-action" @click="retryConnection">
+              {{ reconnectLabel }}
+            </button>
+            <button type="button" class="bridle__banner-action" @click="reloadPage">
+              {{ reloadLabel }}
+            </button>
+          </span>
         </template>
       </div>
 

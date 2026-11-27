@@ -274,6 +274,11 @@ export interface IBridleInitOptions {
   reconnectLabel?: string
   /** Banner button shown for a static token, which only a reload can replace. Default: "Reload the page". */
   reloadLabel?: string
+  /**
+   * Banner text when the hub cannot be reached at all. Default:
+   * "There is an issue connecting to the service. Please refresh the page."
+   */
+  connectionErrorLabel?: string
   /** Hooks for headless side effects in addition to the UI. */
   onReady?: () => void
   onMessage?: (message: IBridleMessage) => void

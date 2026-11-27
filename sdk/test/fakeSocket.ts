@@ -14,6 +14,12 @@ export interface IHub {
   check: (auth: AuthPayload) => string | null
   /** Optional: a non-fatal warning to emit after an accepted handshake. */
   warn?: (auth: AuthPayload) => string | null
+  /**
+   * Optional: the network between browser and hub. Return a message to fail
+   * the attempt the way socket.io does when no transport gets through
+   * (`connect_error`, never reaching the hub), or null to let it in.
+   */
+  network?: () => string | null
 }
 
 export const sockets: FakeSocket[] = []
@@ -25,7 +31,11 @@ export class FakeSocket {
   connected = false
   private handlers = new Map<string, Handler[]>()
 
-  constructor(private readonly auth: AuthOption) {
+  constructor(
+    private readonly auth: AuthOption,
+    /** What `io()` was called with, minus `auth`. */
+    readonly options: Record<string, unknown> = {},
+  ) {
     sockets.push(this)
     queueMicrotask(() => this.connect())
   }
@@ -43,6 +53,11 @@ export class FakeSocket {
   }
 
   connect(): this {
+    const refused = hub.network?.()
+    if (refused) {
+      this.trigger('connect_error', new Error(refused))
+      return this
+    }
     this.auth((data) => {
       this.handshakes.push(data)
       this.connected = true
@@ -83,11 +98,13 @@ export function resetFakes(): void {
   sockets.length = 0
   hub.check = () => null
   hub.warn = undefined
+  hub.network = undefined
 }
 
 /** `vi.mock('socket.io-client', ...)` factory. */
 export const socketIoMock = () => ({
-  io: (_url: string, opts: { auth: AuthOption }) => new FakeSocket(opts.auth),
+  io: (_url: string, { auth, ...options }: { auth: AuthOption } & Record<string, unknown>) =>
+    new FakeSocket(auth, options),
 })
 
 /** A JWT whose payload carries `exp` (seconds). Not signed — the SDK never verifies. */
